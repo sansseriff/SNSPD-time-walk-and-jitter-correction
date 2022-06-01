@@ -221,15 +221,12 @@ def runAnalysisJit(path_, file_, modu_params, DERIV, PROP, delayScan=False, dela
         guardPeriod=600,
     )
 
-
     print("length of clocks: ", len(Clocks))
     print("length of nearestPulseTimes: ", len(nearestPulseTimes))
     if Figures:
         print("length of reovered clocks: ", len(RecoveredClocks))
         checkLocking(Clocks[2000:150000], RecoveredClocks[2000:150000])
 
-    # print(np.shape(nearestPulseTimes))
-    # print(np.shape(RecoveredClocks))
     print("length of dataTags: ", len(dataTags))
     diffsorg = dataTags[1:-1] - nearestPulseTimes[1:-1]
     guassDiffs = diffsorg + delay
@@ -271,6 +268,8 @@ def runAnalysisJit(path_, file_, modu_params, DERIV, PROP, delayScan=False, dela
     diffs = diffs + delay
     diffs = diffs / 1000  # Now in nanoseconds
 
+    ############################################
+
     # Set up red plot
     down_sample = 80
     # make two histograms. One high res for visualization. One low res for finding peaks
@@ -283,6 +282,8 @@ def runAnalysisJit(path_, file_, modu_params, DERIV, PROP, delayScan=False, dela
     hist_peaks, bins_peaks = np.histogram(diffs, bins_peaks, density=True)
     print("ending large histograms")
     inter_pulse_time_ps = inter_pulse_time * 1000
+
+
     pulses = np.array([i * inter_pulse_time for i in range(1, 400)])
 
     # find peaks
