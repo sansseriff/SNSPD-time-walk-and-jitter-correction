@@ -39,22 +39,25 @@ class MaskGenerator:
         self.hist, self.bins = np.histogram(self.diffs, self.bins, density=True)
         self.figures = figures
         self.pulses = np.array([i * self.inter_pulse_time for i in range(1, 400)])
+
         if self.figures:
             plt.figure()
+            self.color_map = cm.get_cmap("viridis")
             print("Mask Generator: length of bins", len(self.bins))
             print("Mask Generator: length of hist: ", len(self.hist))
             plt.plot(self.bins[:-1], self.hist, color="black")
 
             print("pulses: ", self.pulses[:40])
 
-    def apply_mask_from_period(self, adjustment_prop: float, adjustment_mult: float, bootstrap_errorbars: bool = False):
+
+    def apply_mask_from_period(self, adjustment_prop: float = 0, adjustment_mult: float = 0, bootstrap_errorbars: bool = False):
         """
         :param adjustment_prop: used to distort the spacing of bins for short t' values. Useful when the delays
-        start to approach the period of the laser
+        start to approach the period of the laser. Set to zero for no adjustment
         :param adjustment_mult: used to distort the spacing of bins for short t' values. Useful when the delays
-        start to approach the period of the laser
+        start to approach the period of the laser. Set to zero for no adjustment
         :param bootstrap_errorbars: use bootstrap method to generate error bars for the median (\tilde{d}) and width
-        of the distributions
+        of the distributions.
         """
         self.mask_type = "period"
         adjustment = [(i ** adjustment_mult) * adjustment_prop for i in range(20)]
@@ -74,15 +77,14 @@ class MaskGenerator:
                 time_start = time_start + adjustment[i - st]
                 time_end = time_end + adjustment[i - st]
             if self.figures:
-                map = cm.get_cmap("viridis")
-                plt.axvspan(time_start, time_end, alpha=0.3, color=map(i / 120))
+                plt.axvspan(time_start, time_end, alpha=0.3, color=self.color_map(i / 120))
                 plt.vlines(self.pulses, 0.01, 1, color="orange", alpha=0.8)
             t_start[i] = time_start
             t_end[i] = time_end
 
         if self.figures:
             plt.xlim(0, 120)
-            plt.yscale('log')
+            # plt.yscale('log')
             plt.grid()
 
         ##############################
@@ -138,8 +140,8 @@ class MaskGenerator:
                 if bootstrap_errorbars:
                     ranges[jj] = self.bootstrap_median(section, 500) * 4  # 4x sigma for 95% confidence interval
 
-                print("this is rwidth: ", r_widths[jj])
-                print("this is lwidth: ", l_widths[jj])
+                # print("this is rwidth: ", r_widths[jj])
+                # print("this is lwidth: ", l_widths[jj])
 
                 t_prime[jj] = pulse
                 counts[jj] = len(section_org)
@@ -193,8 +195,8 @@ class MaskGenerator:
         """
         self.mask_type = "peaks"
         self.down_sample = down_sample
-        bins_peaks = np.linspace(0, 200, self.max // down_sample + 1)  # lower res for peak finding
-        hist_peaks, bins_peaks = np.histogram(self.diffs, self.bins_peaks, density=True)
+        self.bins_peaks = np.linspace(0, 200, self.max // down_sample + 1)  # lower res for peak finding
+        hist_peaks, self.bins_peaks = np.histogram(self.diffs, self.bins_peaks, density=True)
         # then you gotta go out to far field time and find agreement bewteen laser timing and pulse timing
 
         peaks, props = find_peaks(hist_peaks, height=0.01)
@@ -204,7 +206,7 @@ class MaskGenerator:
         pulses = self.pulses[self.pulses < 1000]
         peaks_rh = peaks_rh[peaks_rh < 1000]
         if self.figures:
-            plt.plot(bins_peaks[:-1], hist_peaks, color="blue")
+            plt.plot(self.bins_peaks[:-1], hist_peaks, color="blue")
             plt.vlines(peaks_rh, 0.01, 1, color="purple", alpha=0.8)
 
         pulses = np.sort(pulses)
@@ -217,10 +219,11 @@ class MaskGenerator:
 
         offsets = []
         pulses_x = []
-        # loop over the peaks and use them to define window bounds that sets of measurements fall into. 
+        # loop over the peaks and use them to define window bounds that sets of measurements fall into.
+        # j = 0
         for i in tqdm(range(len(peaks_rh) - 2, 0, -1)):
             # print(i)
-            j = j + 1
+            # j = j + 1
             bin_center = peaks_rh[i]
             bin_left = bin_center - (peaks_rh[i] - peaks_rh[i - 1]) / 2
             bin_right = bin_center + (peaks_rh[i + 1] - peaks_rh[i]) / 2
@@ -238,7 +241,7 @@ class MaskGenerator:
             offset = np.median(bin_tags)
             if self.figures:
                 plt.plot(mini_bins[:-1], mini_hist)
-                plt.axvspan(bin_left_choked, bin_right_choked, alpha=0.3, color=map(i / len(peaks_rh)))
+                plt.axvspan(bin_left_choked, bin_right_choked, alpha=0.3, color=self.color_map(i / len(peaks_rh)))
                 plt.axvline(offset, color = 'red')
             offset = offset - pulses[i]
 

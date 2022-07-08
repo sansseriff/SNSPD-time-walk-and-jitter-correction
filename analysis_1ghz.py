@@ -30,7 +30,7 @@ from scipy.signal import find_peaks
 from os.path import exists
 
 from tqdm import tqdm
-
+from mask_generators import MaskGenerator
 
 # Colors, palette = phd.viz.phd_style(text=1)
 
@@ -243,6 +243,7 @@ def calculate_diffs(data_tags, nearest_pulse_times, delay):
 
 
 def runAnalysisJit(path_, file_, modu_params, DERIV, PROP, delayScan=False, delay=0, Figures=True):
+    print("starting analysis")
     pulses_per_clock = modu_params["pulses_per_clock"]
     # get data set up
     snspd_channel = -5
@@ -267,172 +268,177 @@ def runAnalysisJit(path_, file_, modu_params, DERIV, PROP, delayScan=False, dela
         deriv=DERIV,
         prop=PROP,
         guardPeriod=600)
-
+    print("clock lock finished")
     if Figures:
         checkLocking(clocks[2000:150000], recovered_clocks[2000:150000])
     make_histogram(data_tags, nearest_pulse_times, delay, stats, Figures)
 
     diffs = calculate_diffs(data_tags, nearest_pulse_times, delay)
 
+    mask_manager = MaskGenerator(diffs, 200000, stats["inter_pulse_time"], figures=True)
+    # mask_manager.apply_mask_from_period()
 
-    # Set up red plot
-    down_sample = 80
-    # make two histograms. One high res for visualization. One low res for finding peaks
-    # the peaks are used to specify the timing bounds used to form the groups for which the median is found
-    max = 200000 # 200 ns
-    bins = np.linspace(0, 200, max + 1)
-    bins_peaks = np.linspace(0, 200, max//down_sample + 1)  # lower res for peak finding
-    print("starting large histograms: ")
-    hist, bins = np.histogram(diffs, bins, density=True)
-    hist_peaks, bins_peaks = np.histogram(diffs, bins_peaks, density=True)
-    print("ending large histograms")
-    inter_pulse_time_ps = stats["inter_pulse_time"] * 1000
+    mask_manager.apply_mask_from_peaks(80)
 
 
-    pulses = np.array([i * stats["inter_pulse_time"] for i in range(1, 400)])
-
-    # find peaks
-    peaks, props = find_peaks(hist_peaks, height=0.01)
-
-    peaks = np.sort(peaks)
-    if Figures:
-        plt.figure()
-        print("length of bins", len(bins))
-        print("length of hist: ", len(hist))
-        # plt.plot(bins[:-1],hist, color = 'black')
-        # plt.vlines(x, 0, 10000, color = 'red', alpha = 0.3)
-        plt.plot(bins[:-1], hist, color="black")
-        plt.plot(bins_peaks[:-1], hist_peaks, color="blue")
-        # plt.vlines(bins[peaks*10], .01, 1, color='red', alpha=0.8)
-        # plt.vlines(pulses - .0908, 0.01, 2, color="green", alpha=0.8)
-        # plt.yscale('log')
-        print("pulses: ", pulses[:40])
-        print(bins[peaks * 10][:10])
-
-    # adjustment = [(i ** 2.9) * 0.00023 for i in range(20)]
-    adjustment = [(i ** 2.9) * 0 for i in range(20)]
-    adjustment.reverse()
-    st = 1
-    t_start = np.zeros(len(pulses))
-    t_end = np.zeros(len(pulses))
-    for i in range(len(pulses)):
-        if i < st:
-            continue
-        time_start = pulses[i] - stats["inter_pulse_time"] / 2.1
-        time_end = pulses[i] + stats["inter_pulse_time"] / 2.1
-        if (i >= st) and i < (st + len(adjustment)):
-            time_start = time_start + adjustment[i - st]
-            time_end = time_end + adjustment[i - st]
-        if Figures:
-            map = cm.get_cmap("viridis")
-            plt.axvspan(time_start, time_end, alpha=0.3, color=map(i / 120))
-        t_start[i] = time_start
-        t_end[i] = time_end
-
-    if Figures:
-        plt.xlim(0, 120)
-        # plt.yscale('log')
-        plt.grid()
-
-    # Set up for fitting histograms
-    avgOffset = np.zeros(len(pulses))
-    stdOffset = np.zeros(len(pulses))
-    background = np.zeros(len(pulses))
-    counts = np.zeros(len(pulses))
-    tPrime = np.zeros(len(pulses))
+    # # Set up red plot
+    # down_sample = 80
+    # # make two histograms. One high res for visualization. One low res for finding peaks
+    # # the peaks are used to specify the timing bounds used to form the groups for which the median is found
+    # max = 200000 # 200 ns
+    # bins = np.linspace(0, 200, max + 1)
+    # bins_peaks = np.linspace(0, 200, max//down_sample + 1)  # lower res for peak finding
+    # print("starting large histograms: ")
+    # hist, bins = np.histogram(diffs, bins, density=True)
+    # hist_peaks, bins_peaks = np.histogram(diffs, bins_peaks, density=True)
+    # print("ending large histograms")
+    # inter_pulse_time_ps = stats["inter_pulse_time"] * 1000
+    #
+    #
+    # pulses = np.array([i * stats["inter_pulse_time"] for i in range(1, 400)])
+    #
+    # # find peaks
+    # peaks, props = find_peaks(hist_peaks, height=0.01)
+    #
+    # peaks = np.sort(peaks)
     # if Figures:
     #     plt.figure()
-    scalefactor = 300
-
-    # print(t_start[20])
-    map = cm.get_cmap("viridis")
-
-    # pulses = pulses - .0908
-    peaks_rh = bins[peaks * down_sample]
-
-    pulses = pulses[pulses < 1000]
-    peaks_rh = peaks_rh[peaks_rh < 1000]
-
-    # for i in range(len(peaks_rh) - 1, -1, -1):
-    plt.vlines(pulses, 0.01, 1, color="orange", alpha=0.8)
-    plt.vlines(peaks_rh, 0.01, 1, color="purple", alpha=0.8)
-
-    offsets = []
-    pulses_x = []
-
-    if Figures:
-        plt.figure()
-
-    j = 0
-    pulses = np.sort(pulses)
-    peaks_rh = np.sort(peaks_rh)
-    peaks_rh = peaks_rh.tolist()
-    pulses = pulses.tolist()
-
-    # this is really dumb!!!
-    while len(peaks_rh) != len(pulses):
-        pulses.pop(0)
-    # make the pulses and peaks_rh arrays the same length. They are aligned from the end.
-
-    for i in tqdm(range(len(peaks_rh) - 2, 0, -1)):
-        # print(i)
-        j = j + 1
-        bin_center = peaks_rh[i]
-        bin_left = bin_center - (peaks_rh[i] - peaks_rh[i - 1]) / 2
-        bin_right = bin_center + (peaks_rh[i + 1] - peaks_rh[i]) / 2
-
-        bin_left_choked = bin_center - (peaks_rh[i] - peaks_rh[i - 1]) / 2.1
-        bin_right_choked = bin_center + (peaks_rh[i + 1] - peaks_rh[i]) / 2.1
-        mask = (diffs > bin_left) & (diffs < bin_right)
-        mask_choked = (diffs > bin_left_choked) & (diffs < bin_right_choked)
-        bin_tags = diffs[mask]
-        bin_tags_choked = diffs[mask_choked]
-
-        mini_bins = np.linspace(bin_left, bin_right, 100)
-        # the individual histograms take some time...
-        # mini_hist, mini_bins = np.histogram(bin_tags, mini_bins)
-        # if Figures:
-        #     plt.plot(mini_bins[:-1], mini_hist)
-        #     plt.axvspan(bin_left_choked, bin_right_choked, alpha=0.3, color=map(i / len(peaks_rh)))
-        #     plt.axvline(np.median(bin_tags), color = 'red')
-        offset = np.median(bin_tags) - pulses[i]
-        # print("pulses: ", pulses[i])
-        # print("peak: ", peaks_rh[i])
-        # print("np.median: ", np.median(bin_tags))
-        # print("####################")
-        offset_choked = np.median(bin_tags_choked) - pulses[i]
-        offsets.append(offset_choked)
-        pulses_x.append(pulses[i])
-
-    pulses_x = np.array(pulses_x)
-    offsets = np.array(offsets)
-
-    sorter = np.argsort(pulses_x)
-    pulses_x = pulses_x[sorter]
-    offsets = offsets[sorter]
-
-    zero_offset = np.mean(offsets[-40:])
-    offsets = offsets - zero_offset  # offsets gets converted to a numpy array, from a list, because zero_offset is np.
-    if Figures:
-        plt.figure()
-        plt.plot(pulses_x, offsets)
-        plt.xlabel("time (ns)")
-        plt.ylabel("offsets (ps)")
-        plt.plot(pulses_x[-40:], offsets[-40:], lw=2.4, color="red")
-        plt.grid()
-
-    time_date = str(datetime.datetime.now()).replace(":", "_").replace("-", "_")[:-7]
-    data_str = json.dumps({"pulses_x": pulses_x.tolist(), "offsets": offsets.tolist()})
-    file_name_base = f"peacoq_1GHz_jitterate_curve_{time_date}"
-    file_name = file_name_base + ".json"
-    i = 0
-    print("does it exist: ", exists(file_name))
-    while exists(file_name):
-        i += 1
-        file_name = file_name_base + f"_{i}.json"
-    with open(file_name, "w") as file:
-        print(f"saving as {file_name}")
-        file.write(data_str)
+    #     print("length of bins", len(bins))
+    #     print("length of hist: ", len(hist))
+    #     # plt.plot(bins[:-1],hist, color = 'black')
+    #     # plt.vlines(x, 0, 10000, color = 'red', alpha = 0.3)
+    #     plt.plot(bins[:-1], hist, color="black")
+    #     plt.plot(bins_peaks[:-1], hist_peaks, color="blue")
+    #     # plt.vlines(bins[peaks*10], .01, 1, color='red', alpha=0.8)
+    #     # plt.vlines(pulses - .0908, 0.01, 2, color="green", alpha=0.8)
+    #     # plt.yscale('log')
+    #     print("pulses: ", pulses[:40])
+    #     print(bins[peaks * 10][:10])
+    #
+    # # adjustment = [(i ** 2.9) * 0.00023 for i in range(20)]
+    # adjustment = [(i ** 2.9) * 0 for i in range(20)]
+    # adjustment.reverse()
+    # st = 1
+    # t_start = np.zeros(len(pulses))
+    # t_end = np.zeros(len(pulses))
+    # for i in range(len(pulses)):
+    #     if i < st:
+    #         continue
+    #     time_start = pulses[i] - stats["inter_pulse_time"] / 2.1
+    #     time_end = pulses[i] + stats["inter_pulse_time"] / 2.1
+    #     if (i >= st) and i < (st + len(adjustment)):
+    #         time_start = time_start + adjustment[i - st]
+    #         time_end = time_end + adjustment[i - st]
+    #     if Figures:
+    #         map = cm.get_cmap("viridis")
+    #         plt.axvspan(time_start, time_end, alpha=0.3, color=map(i / 120))
+    #     t_start[i] = time_start
+    #     t_end[i] = time_end
+    #
+    # if Figures:
+    #     plt.xlim(0, 120)
+    #     # plt.yscale('log')
+    #     plt.grid()
+    #
+    # # Set up for fitting histograms
+    # avgOffset = np.zeros(len(pulses))
+    # stdOffset = np.zeros(len(pulses))
+    # background = np.zeros(len(pulses))
+    # counts = np.zeros(len(pulses))
+    # tPrime = np.zeros(len(pulses))
+    # # if Figures:
+    # #     plt.figure()
+    # scalefactor = 300
+    #
+    # # print(t_start[20])
+    # map = cm.get_cmap("viridis")
+    #
+    # # pulses = pulses - .0908
+    # peaks_rh = bins[peaks * down_sample]
+    #
+    # pulses = pulses[pulses < 1000]
+    # peaks_rh = peaks_rh[peaks_rh < 1000]
+    #
+    # # for i in range(len(peaks_rh) - 1, -1, -1):
+    # plt.vlines(pulses, 0.01, 1, color="orange", alpha=0.8)
+    # plt.vlines(peaks_rh, 0.01, 1, color="purple", alpha=0.8)
+    #
+    # offsets = []
+    # pulses_x = []
+    #
+    # if Figures:
+    #     plt.figure()
+    #
+    # j = 0
+    # pulses = np.sort(pulses)
+    # peaks_rh = np.sort(peaks_rh)
+    # peaks_rh = peaks_rh.tolist()
+    # pulses = pulses.tolist()
+    #
+    # # this is really dumb!!!
+    # while len(peaks_rh) != len(pulses):
+    #     pulses.pop(0)
+    # # make the pulses and peaks_rh arrays the same length. They are aligned from the end.
+    #
+    # for i in tqdm(range(len(peaks_rh) - 2, 0, -1)):
+    #     # print(i)
+    #     j = j + 1
+    #     bin_center = peaks_rh[i]
+    #     bin_left = bin_center - (peaks_rh[i] - peaks_rh[i - 1]) / 2
+    #     bin_right = bin_center + (peaks_rh[i + 1] - peaks_rh[i]) / 2
+    #
+    #     bin_left_choked = bin_center - (peaks_rh[i] - peaks_rh[i - 1]) / 2.1
+    #     bin_right_choked = bin_center + (peaks_rh[i + 1] - peaks_rh[i]) / 2.1
+    #     mask = (diffs > bin_left) & (diffs < bin_right)
+    #     mask_choked = (diffs > bin_left_choked) & (diffs < bin_right_choked)
+    #     bin_tags = diffs[mask]
+    #     bin_tags_choked = diffs[mask_choked]
+    #
+    #     mini_bins = np.linspace(bin_left, bin_right, 100)
+    #     # the individual histograms take some time...
+    #     # mini_hist, mini_bins = np.histogram(bin_tags, mini_bins)
+    #     # if Figures:
+    #     #     plt.plot(mini_bins[:-1], mini_hist)
+    #     #     plt.axvspan(bin_left_choked, bin_right_choked, alpha=0.3, color=map(i / len(peaks_rh)))
+    #     #     plt.axvline(np.median(bin_tags), color = 'red')
+    #     offset = np.median(bin_tags) - pulses[i]
+    #     # print("pulses: ", pulses[i])
+    #     # print("peak: ", peaks_rh[i])
+    #     # print("np.median: ", np.median(bin_tags))
+    #     # print("####################")
+    #     offset_choked = np.median(bin_tags_choked) - pulses[i]
+    #     offsets.append(offset_choked)
+    #     pulses_x.append(pulses[i])
+    #
+    # pulses_x = np.array(pulses_x)
+    # offsets = np.array(offsets)
+    #
+    # sorter = np.argsort(pulses_x)
+    # pulses_x = pulses_x[sorter]
+    # offsets = offsets[sorter]
+    #
+    # zero_offset = np.mean(offsets[-40:])
+    # offsets = offsets - zero_offset  # offsets gets converted to a numpy array, from a list, because zero_offset is np.
+    # if Figures:
+    #     plt.figure()
+    #     plt.plot(pulses_x, offsets)
+    #     plt.xlabel("time (ns)")
+    #     plt.ylabel("offsets (ps)")
+    #     plt.plot(pulses_x[-40:], offsets[-40:], lw=2.4, color="red")
+    #     plt.grid()
+    #
+    # time_date = str(datetime.datetime.now()).replace(":", "_").replace("-", "_")[:-7]
+    # data_str = json.dumps({"pulses_x": pulses_x.tolist(), "offsets": offsets.tolist()})
+    # file_name_base = f"peacoq_1GHz_jitterate_curve_{time_date}"
+    # file_name = file_name_base + ".json"
+    # i = 0
+    # print("does it exist: ", exists(file_name))
+    # while exists(file_name):
+    #     i += 1
+    #     file_name = file_name_base + f"_{i}.json"
+    # with open(file_name, "w") as file:
+    #     print(f"saving as {file_name}")
+    #     file.write(data_str)
 
 
 def sleeper(t, iter, tbla=0):
@@ -494,7 +500,7 @@ if __name__ == "__main__":
 
     else:
         path = "C://Users//Andrew//Documents//peacoq_1_ghz//Wire_1//41mV"
-        file = "W1_41mV_3.0s_41.5.1.ttbin"
+        file = "W1_41mV_3.0s_64.0.1.ttbin"
         # params_file = "..//modu//custom_4ghz.yml"
         # with open(params_file, 'r') as f:
         #     modu_params = yaml.full_load(f)
