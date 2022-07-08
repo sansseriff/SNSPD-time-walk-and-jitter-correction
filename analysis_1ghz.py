@@ -1,10 +1,9 @@
 from TimeTagger import createTimeTagger, FileWriter, FileReader
-import numpy as np
 
 from time import sleep
-
-import struct
 import matplotlib.pyplot as plt
+import matplotlib
+# matplotlib.use('Qt5Agg')
 import os
 import numpy as np
 import yaml
@@ -23,7 +22,7 @@ from clock_tools import clockLock
 from clock_tools import RepeatedPll
 from datetime import date
 import datetime
-import phd.viz
+# import phd.viz
 import concurrent.futures
 import glob
 from matplotlib import cm
@@ -33,7 +32,7 @@ from os.path import exists
 from tqdm import tqdm
 
 
-Colors, palette = phd.viz.phd_style(text=1)
+# Colors, palette = phd.viz.phd_style(text=1)
 
 
 def delayCorrect(_dataTags):
@@ -130,108 +129,87 @@ def save_incrementor(dic):
     pass  # see log on 3/30/2022 for what I want to make. A json saver using ()local
 
 
-def runAnalysisJit(path_, file_, modu_params, DERIV, PROP, delayScan=False, delay=0, Figures=True):
-    # pulses_per_clock = modu_params["cycles_per_sequence"]
-    # pulse_rate = modu_params["system"]["laser_rate"]/modu_params["regular"]["data"]["pulse_divider"]
-    pulses_per_clock = modu_params["pulses_per_clock"]
-    # pulse_rate = modu_params["pulse_rate"]
-    # pulse_rate = 1.000692
-    # pulses_per_clock = 500
-    # pulse_rate = 1 # GHz
-
-    print("pulses per clock: ", pulses_per_clock)
-
-    # get data set up
-    snspd_channel = -5
-    clock_channel = 9
-    full_path = os.path.join(path_, file_)
+def load_snspd_and_clock_tags(file: str, path: str, snspd_ch: int, clock_ch: int, read_events = 1e9, debug= False):
+    full_path = os.path.join(path, file)
     file_reader = FileReader(full_path)
-    n_events = 1000000000  # Number of events to read at once
-
-    n_events = 10000000  # Number of events to read at once
-    data = file_reader.getData(n_events)
-    print("Size of the returned data chunk: {:d} events\n".format(data.size))
-    print("Showing a few selected timetags")
-    channels = data.getChannels()  # these are numpy arrays
+    data = file_reader.getData(read_events)
+    if debug:
+        print("load_snspd_and_clock_tags: Size of the returned data chunk: {:d} events\n".format(data.size))
+    channels = data.getChannels()
     timetags = data.getTimestamps()
-    SNSPD_tags = timetags[channels == snspd_channel]
-    CLOCK_tags = timetags[channels == clock_channel]
-    print("SNSPD TAGS:   ", len(SNSPD_tags))
-    count_rate = 1e12 * (len(SNSPD_tags) / (SNSPD_tags[-1] - SNSPD_tags[0]))
-    print("Count rate is: ", count_rate)
-    clock_rate = 1e12 * (len(CLOCK_tags) / (CLOCK_tags[-1] - CLOCK_tags[0]))
-    pulse_rate = (clock_rate * pulses_per_clock) / 1e9
-    print("Clock rate is: ", clock_rate)
-    print("pulse rate: ", pulse_rate)
-    inter_pulse_time = 1 / pulse_rate  # time between pulses in nanoseconds
-    print("inter_pulse_time: ", inter_pulse_time)
-    time_elapsed = 1e-12 * (SNSPD_tags[-1] - SNSPD_tags[0])
-    print("time elapsed: ", time_elapsed)
+    SNSPD_tags = timetags[channels == snspd_ch]
+    CLOCK_tags = timetags[channels == clock_ch]
+    return SNSPD_tags, CLOCK_tags, channels, timetags
 
-    # optional delay analysis
-    if delayScan:  # to be done with a low detection rate file (high attentuation)
-        dataNumbers = []
-        delayRange = np.array([i - 500 for i in range(1000)])
+
+def data_statistics(modu_params, snspd_tags, clock_tags, debug = True):
+    pulses_per_clock = modu_params["pulses_per_clock"]
+    count_rate = 1e12 * (len(snspd_tags) / (snspd_tags[-1] - snspd_tags[0]))
+    clock_rate = 1e12 * (len(clock_tags) / (clock_tags[-1] - clock_tags[0]))
+    pulse_rate = (clock_rate * pulses_per_clock) / 1e9
+    inter_pulse_time = 1 / pulse_rate  # time between pulses in nanoseconds
+    time_elapsed = 1e-12 * (snspd_tags[-1] - snspd_tags[0])
+
+    if debug:
+        print("SNSPD TAGS:   ", len(snspd_tags))
+        print("Count rate is: ", count_rate)
+        print("Clock rate is: ", clock_rate)
+        print("pulse rate: ", pulse_rate)
+        print("inter_pulse_time: ", inter_pulse_time)
+        print("time elapsed: ", time_elapsed)
+
+    return {"count_rate": count_rate,
+            "clock_rate": clock_rate,
+            "pulse_rate": pulse_rate,
+            "inter_pulse_time": inter_pulse_time,
+            "time_elapsed": time_elapsed}
+
+
+def delay_analysis(channels, timetags, clock_channel, snspd_channel, stats, delay, deriv, prop):
+    dataNumbers = []
+    delayRange = np.array([i - 500 for i in range(1000)])
+    Clocks, RecoveredClocks, dataTags, nearestPulseTimes, Cycles = clockLock(
+        channels[:100000],
+        timetags[:100000],
+        clock_channel,
+        snspd_channel,
+        stats["pulses_per_clock"],
+        delay,
+        window=0.01,
+        deriv=deriv,
+        prop=prop,
+    )
+    checkLocking(Clocks, RecoveredClocks)
+    for i, delay in enumerate(delayRange):
         Clocks, RecoveredClocks, dataTags, nearestPulseTimes, Cycles = clockLock(
             channels[:100000],
             timetags[:100000],
             clock_channel,
             snspd_channel,
-            pulses_per_clock,
+            stats["pulses_per_clock"],
             delay,
             window=0.01,
-            deriv=DERIV,
-            prop=PROP,
+            deriv=deriv,
+            prop=prop,
         )
-        checkLocking(Clocks, RecoveredClocks)
-        for i, delay in enumerate(delayRange):
-            Clocks, RecoveredClocks, dataTags, nearestPulseTimes, Cycles = clockLock(
-                channels[:100000],
-                timetags[:100000],
-                clock_channel,
-                snspd_channel,
-                pulses_per_clock,
-                delay,
-                window=0.01,
-                deriv=DERIV,
-                prop=PROP,
-            )
-            deltaTimes = dataTags[1:-1] - np.roll(dataTags, 1)[1:-1]
-            dataNumbers.append(len(deltaTimes))
-        dataNumbers = np.array(dataNumbers)
-        # delay = delayRange[np.argmax(dataNumbers)]
-        plt.figure()
-        plt.plot(delayRange, dataNumbers)
-        print("Max counts found at delay: ", delayRange[np.argmax(dataNumbers)])
-        plt.title("peak value is phase (ps) bewteen clock and SNSPD tags")
-        print("Offset time: ", delayRange[np.argmax(dataNumbers)])
-        return 0  # after
+        deltaTimes = dataTags[1:-1] - np.roll(dataTags, 1)[1:-1]
+        dataNumbers.append(len(deltaTimes))
+    dataNumbers = np.array(dataNumbers)
+    # delay = delayRange[np.argmax(dataNumbers)]
+    plt.figure()
+    plt.plot(delayRange, dataNumbers)
+    print("Max counts found at delay: ", delayRange[np.argmax(dataNumbers)])
+    plt.title("peak value is phase (ps) bewteen clock and SNSPD tags")
+    print("Offset time: ", delayRange[np.argmax(dataNumbers)])
+    return 0  # after
 
-    # decode clocks and tags with correct delay
-    Clocks, RecoveredClocks, dataTags, nearestPulseTimes, Cycles = clockLock(
-        channels,
-        timetags,
-        clock_channel,
-        snspd_channel,
-        pulses_per_clock,
-        delay,
-        window=0.50,
-        deriv=DERIV,
-        prop=PROP,
-        guardPeriod=600,
-    )
 
-    print("length of clocks: ", len(Clocks))
-    print("length of nearestPulseTimes: ", len(nearestPulseTimes))
-    if Figures:
-        print("length of reovered clocks: ", len(RecoveredClocks))
-        checkLocking(Clocks[2000:150000], RecoveredClocks[2000:150000])
-
-    print("length of dataTags: ", len(dataTags))
+def make_histogram(dataTags, nearestPulseTimes, delay, stats, Figures):
     diffsorg = dataTags[1:-1] - nearestPulseTimes[1:-1]
     guassDiffs = diffsorg + delay
 
-    guassEdges = np.linspace(int(-inter_pulse_time*1000*.5), int(inter_pulse_time*1000*.5), 4001) # 1 period width
+    guassEdges = np.linspace(int(-stats["inter_pulse_time"] * 1000 * .5), int(stats["inter_pulse_time"] * 1000 * .5),
+                             4001)  # 1 period width
     print("length of guassDiffs: ", len(guassDiffs))
     guassHist, guassBins = np.histogram(guassDiffs, guassEdges, density=True)
     gaussianBG = gaussian_bg(a=guassDiffs.min() / 1000, b=guassDiffs.max() / 1000, name="gaussianBG")
@@ -244,31 +222,58 @@ def runAnalysisJit(path_, file_, modu_params, DERIV, PROP, delayScan=False, dela
     print("time of fit: ", end - start)
     guassStd2 = guassStd2 * scalefactor
     guassAvg2 = guassAvg2 * scalefactor
-    # print("guassStd2: ", guassStd2)
-    # print("guassAvg2: ", guassAvg2)
+
     if Figures:
-        fig, ax = plt.subplots(2,1)
+        fig, ax = plt.subplots(2, 1)
         ax[0].plot(guassBins[1:], guassHist)
         ax[1].plot(guassBins[1:], guassHist)
         ax[1].set_yscale('log')
-        # plt.plot(
-        #     guassBins[1:],
-        #     gaussianBG.pdf(
-        #         guassBins[1:] / scalefactor, back=back, sigma=guassStd2 / scalefactor, mu=guassAvg2 / scalefactor,
-        #     )
-        #     / scalefactor,
-        # )
         ax[0].set_title("histogram of counts wrt clock")
 
 
-    diffsR = dataTags[1:-1] - nearestPulseTimes[1:-1]
-    nearestPulseTimes = np.roll(nearestPulseTimes, 1)
-    dataTagsRolled = np.roll(dataTags, 1)
-    diffs = dataTags[1:-1] - nearestPulseTimes[1:-1]
+def calculate_diffs(data_tags, nearest_pulse_times, delay):
+    # this function subtracts the previous laser-based timing from the timing of snspd tags
+    # output is in nanoseconds
+
+    nearest_pulse_times = np.roll(nearest_pulse_times, 1)
+    diffs = data_tags[1:-1] - nearest_pulse_times[1:-1]
     diffs = diffs + delay
     diffs = diffs / 1000  # Now in nanoseconds
+    return diffs
 
-    ############################################
+
+def runAnalysisJit(path_, file_, modu_params, DERIV, PROP, delayScan=False, delay=0, Figures=True):
+    pulses_per_clock = modu_params["pulses_per_clock"]
+    # get data set up
+    snspd_channel = -5
+    clock_channel = 9
+    snspd_tags, clock_tags, channels, timetags = \
+        load_snspd_and_clock_tags(file_, path_, snspd_channel, clock_channel)
+    stats = data_statistics(modu_params, snspd_tags, clock_tags, debug=False)
+
+    # optional delay analysi
+    if delayScan:  # to be done with a low detection rate file (high attentuation)
+        delay_analysis(channels, timetags, clock_channel, snspd_channel, stats, delay, DERIV, PROP)
+
+    # decode clocks and tags with correct delay
+    clocks, recovered_clocks, data_tags, nearest_pulse_times, cycles = clockLock(
+        channels,
+        timetags,
+        clock_channel,
+        snspd_channel,
+        pulses_per_clock,
+        delay,
+        window=0.50,
+        deriv=DERIV,
+        prop=PROP,
+        guardPeriod=600)
+
+    if Figures:
+        checkLocking(clocks[2000:150000], recovered_clocks[2000:150000])
+    make_histogram(data_tags, nearest_pulse_times, delay, stats, Figures)
+
+    diffs = calculate_diffs(data_tags, nearest_pulse_times, delay)
+
 
     # Set up red plot
     down_sample = 80
@@ -281,10 +286,10 @@ def runAnalysisJit(path_, file_, modu_params, DERIV, PROP, delayScan=False, dela
     hist, bins = np.histogram(diffs, bins, density=True)
     hist_peaks, bins_peaks = np.histogram(diffs, bins_peaks, density=True)
     print("ending large histograms")
-    inter_pulse_time_ps = inter_pulse_time * 1000
+    inter_pulse_time_ps = stats["inter_pulse_time"] * 1000
 
 
-    pulses = np.array([i * inter_pulse_time for i in range(1, 400)])
+    pulses = np.array([i * stats["inter_pulse_time"] for i in range(1, 400)])
 
     # find peaks
     peaks, props = find_peaks(hist_peaks, height=0.01)
@@ -313,8 +318,8 @@ def runAnalysisJit(path_, file_, modu_params, DERIV, PROP, delayScan=False, dela
     for i in range(len(pulses)):
         if i < st:
             continue
-        time_start = pulses[i] - inter_pulse_time / 2.1
-        time_end = pulses[i] + inter_pulse_time / 2.1
+        time_start = pulses[i] - stats["inter_pulse_time"] / 2.1
+        time_end = pulses[i] + stats["inter_pulse_time"] / 2.1
         if (i >= st) and i < (st + len(adjustment)):
             time_start = time_start + adjustment[i - st]
             time_end = time_end + adjustment[i - st]
@@ -488,8 +493,8 @@ if __name__ == "__main__":
             json.dump(LS, outfile, indent=4)
 
     else:
-        path = "C://Users//Andrew//Documents//peacoq 1_GHz//Wire_1//41mV"
-        file = "W1_41mV_3.0s_40.5.1.ttbin"
+        path = "C://Users//Andrew//Documents//peacoq_1_ghz//Wire_1//41mV"
+        file = "W1_41mV_3.0s_41.5.1.ttbin"
         # params_file = "..//modu//custom_4ghz.yml"
         # with open(params_file, 'r') as f:
         #     modu_params = yaml.full_load(f)

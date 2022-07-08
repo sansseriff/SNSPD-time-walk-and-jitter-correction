@@ -3,6 +3,9 @@ from scipy.signal import find_peaks
 from matplotlib import cm
 import matplotlib.pyplot as plt
 from tqdm import tqdm
+from sklearn.neighbors import KernelDensity
+from scipy import signal
+import math
 '''
 MASK GENERATORS
 the diffs histogram needs to be split up into many time windows, each of which has one guassian of counts
@@ -21,7 +24,13 @@ sufficient, and likely more reliable.
 
 
 class MaskGenerator:
-    def __init__(self, diffs, max, inter_pulse_time, figures = False):
+    def __init__(self, diffs: np.ndarray, max: int, inter_pulse_time: float, figures: bool = False):
+        """
+        :param diffs: SNSPD tag minus previous laser-based time
+        :param max: maximum time on t' vs d curve in ps
+        :param inter_pulse_time: time bewteen laser pulses
+        :param figures: turn off or on figures
+        """
         self.diffs = diffs
         self.mask_type = "nan"
         self.max = max  # in picoseconds
@@ -38,11 +47,22 @@ class MaskGenerator:
 
             print("pulses: ", self.pulses[:40])
 
-    def apply_mask_from_period(self, adjustment_prop = 0.00023, adjustment_mult = 2.9):
+    def apply_mask_from_period(self, adjustment_prop: float, adjustment_mult: float, bootstrap_errorbars: bool = False):
+        """
+        :param adjustment_prop: used to distort the spacing of bins for short t' values. Useful when the delays
+        start to approach the period of the laser
+        :param adjustment_mult: used to distort the spacing of bins for short t' values. Useful when the delays
+        start to approach the period of the laser
+        :param bootstrap_errorbars: use bootstrap method to generate error bars for the median (\tilde{d}) and width
+        of the distributions
+        """
         self.mask_type = "period"
         adjustment = [(i ** adjustment_mult) * adjustment_prop for i in range(20)]
         adjustment.reverse()
         st = 1
+
+        # make t_start and t_end arrays.
+        # Used for settings the bounds used to chop up the original giant histogram
         t_start = np.zeros(len(self.pulses))
         t_end = np.zeros(len(self.pulses))
         for i in range(len(self.pulses)):
@@ -60,7 +80,117 @@ class MaskGenerator:
             t_start[i] = time_start
             t_end[i] = time_end
 
+        if self.figures:
+            plt.xlim(0, 120)
+            plt.yscale('log')
+            plt.grid()
+
+        ##############################
+        ##############################
+        # Set up for fitting histograms
+        # avgOffset = np.zeros(len(self.pulses))
+        # stdOffset = np.zeros(len(self.pulses))
+        # background = np.zeros(len(self.pulses))
+        counts = np.zeros(len(self.pulses))
+        t_prime = np.zeros(len(self.pulses))
+        ranges = np.zeros(len(self.pulses))
+        r_widths = np.zeros(len(self.pulses))
+        l_widths = np.zeros(len(self.pulses))
+        median = np.zeros(len(self.pulses))
+        fwhm_ranges = np.zeros(len(self.pulses))
+
+        kde = KernelDensity(bandwidth=.025, kernel='gaussian')  # bw has units of nanoseconds
+        for jj, pulse in enumerate(self.pulses):
+
+            if jj >= 160:  # avoiding some error I don't want to deal with
+                break
+            section = self.diffs[(self.diffs > t_start[jj]) & (self.diffs < t_end[jj])]
+            section_org = section
+            section = section[:50000]  # don't need more stats than this.
+            if len(section) > 10:  # if more than 5 counts, try to fit the counts to a guassian
+                # q = time.time()
+
+                bins_idx_left = np.searchsorted(self.bins, t_start[jj], side="left") - 1
+                bins_idx_right = np.searchsorted(self.bins, t_end[jj], side="left")
+                section_bins = self.bins[bins_idx_left:bins_idx_right]
+
+                single_distribution_hist, section_bins = np.histogram(section, section_bins, density=True)
+                # print("size of section: ", len(section))
+                # print("length of bins: ", len(self.bins))
+
+                if bootstrap_errorbars:
+                    fwhm_l_ranges, fwhm_r_ranges = \
+                        self.bootstrap_kde(section, kde, self.bins, bins_idx_left, bins_idx_right, 18)
+                    fwhm_ranges[jj] = math.sqrt(fwhm_l_ranges ** 2 + fwhm_r_ranges ** 2)
+
+                kde.fit(section[:8000, None])
+                logprob = kde.score_samples(section_bins[:, None])
+                peaks, _ = signal.find_peaks(np.exp(logprob))
+                max = peaks[np.argmax(logprob[peaks])]
+                width, w_height, lw, rw = signal.peak_widths(np.exp(logprob), np.array([max]), rel_height=0.5)
+                r_widths[jj] = np.interp(
+                    rw, np.arange(0, bins_idx_right - bins_idx_left),
+                    self.bins[bins_idx_left:bins_idx_right])[0]
+                l_widths[jj] = np.interp(
+                    lw, np.arange(0, bins_idx_right - bins_idx_left),
+                    self.bins[bins_idx_left:bins_idx_right])[0]
+
+                if bootstrap_errorbars:
+                    ranges[jj] = self.bootstrap_median(section, 500) * 4  # 4x sigma for 95% confidence interval
+
+                print("this is rwidth: ", r_widths[jj])
+                print("this is lwidth: ", l_widths[jj])
+
+                t_prime[jj] = pulse
+                counts[jj] = len(section_org)
+                median[jj] = np.median(section) - pulse
+
+                if self.figures:
+                    plt.plot(section_bins[1:], single_distribution_hist)
+                    plt.plot(section_bins, np.exp(logprob), alpha=1, color='red')
+                    plt.axvspan(r_widths[jj], l_widths[jj], color='green', alpha=0.3)
+                    # plt.axvline(x=Mu2, color = 'red')
+                    # plt.axvline(x=np.median(section), color = 'green')
+                    plt.axvline(median[jj], color='blue', alpha=0.4)
+                    # plt.axvline(x[jj], color='red', alpha=0.3)
+
+
+    def bootstrap_kde(self, section, estimator, bins, bins_idx_left, bins_idx_right, number=50):
+        lims_l = np.zeros(number)
+        lims_r = np.zeros(number)
+        for i in range(number):
+            sect = np.random.choice(section[:8000], size=len(section))
+            estimator.fit(sect[:, None])
+            logprob = estimator.score_samples(bins[bins_idx_left:bins_idx_right, None])
+            peaks, _ = signal.find_peaks(np.exp(logprob))
+            max = peaks[np.argmax(logprob[peaks])]
+            _, _, lw, rw = signal.peak_widths(np.exp(logprob), np.array([max]), rel_height=0.5)
+
+            lims_r[i] = np.interp(rw, np.arange(0, bins_idx_right - bins_idx_left), bins[bins_idx_left:bins_idx_right])[
+                0]
+            lims_l[i] = np.interp(lw, np.arange(0, bins_idx_right - bins_idx_left), bins[bins_idx_left:bins_idx_right])[
+                0]
+
+        return np.std(lims_l) * 4, np.std(lims_r) * 4
+
+    def bootstrap_median(self, section, number=100):
+        """
+        Used for making error bars for the \tilde{d} delay values in the t' vs \tilde{d} curve.
+        :param section: delay measurments for a particular t'
+        :param number: number of times sections is sampled (bootstrap iterations)
+        :return: error estimate
+        """
+        meds = np.zeros(number)
+        for i in range(number):
+            meds[i] = np.median(np.random.choice(section, size=len(section)))
+
+        return np.std(meds)
+
     def apply_mask_from_peaks(self, down_sample):
+        """
+        :param down_sample: Peaks are found from a histogram that is lower resolution than the native 1ps. These are
+        scaled down by the factor down_sample. 
+        """
         self.mask_type = "peaks"
         self.down_sample = down_sample
         bins_peaks = np.linspace(0, 200, self.max // down_sample + 1)  # lower res for peak finding
@@ -87,6 +217,7 @@ class MaskGenerator:
 
         offsets = []
         pulses_x = []
+        # loop over the peaks and use them to define window bounds that sets of measurements fall into. 
         for i in tqdm(range(len(peaks_rh) - 2, 0, -1)):
             # print(i)
             j = j + 1
@@ -124,6 +255,13 @@ class MaskGenerator:
 
         zero_offset = np.mean(offsets[-40:])
         self.offsets = offsets - zero_offset
+        if self.figures:
+            plt.figure()
+            plt.plot(pulses_x, self.offsets)
+            plt.xlabel("time (ns)")
+            plt.ylabel("offsets (ps)")
+            plt.plot(pulses_x[-40:], self.offsets[-40:], lw=2.4, color="red")
+            plt.grid()
 
     def plot_tprime_offset(self):
         plt.figure()
@@ -132,3 +270,5 @@ class MaskGenerator:
         plt.ylabel("offsets (ps)")
         plt.plot(self.pulses_x[-40:], self.offsets[-40:], lw=2.4, color="red")
         plt.grid()
+
+
