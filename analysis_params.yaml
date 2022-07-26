@@ -1,0 +1,33 @@
+params:
+  data_path: "C://Users//Andrew//Documents//peacoq_1_ghz//Wire_1//41mV"
+  data_file: "W1_41mV_3.0s_54.0.1.ttbin"
+  snspd_channel: -5
+  clock_channel: 9
+  show_figures: True
+  analysis_range: 200000 #picoseconds
+  use_existing_cal_curve: False
+  cal_curve_path: "./default_curve.json"
+  delay_scan: False #should the program search for initial estimate of the timing offset bewteen the clock and snspd tags
+  delay: -204
+  analyze_set: False # if true,
+
+  phase_locked_loop:
+    deriv: 500
+    prop: 1.0e-11
+    window: 0.5
+    guard_period: 600 # how much data to throw away at the beginning when PLL is stabilizing
+
+  modulation_params:
+    pulses_per_clock: 500
+    pulse_rate: 1
+
+  mask_method: "from_period" # options are "from_period" or "from_peaks"
+  mask_from_period:
+    adjustment_prop: 0.0
+    adjustment_mult: 0.0
+    bootstrap_errorbars: False
+    kde_bandwidth: 0.0025 # amount of histogram smoothing in ps before measuring FWHM
+    low_cutoff: 6 # number of periods at the very beginning to ignore
+  mask_from_peaks:
+    down_sample: 8
+

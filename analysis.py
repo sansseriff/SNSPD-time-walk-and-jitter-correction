@@ -22,7 +22,7 @@ from clock_tools import clockLock
 from clock_tools import RepeatedPll
 from datetime import date
 import datetime
-# import phd.viz
+import phd.viz
 import concurrent.futures
 import glob
 from matplotlib import cm
@@ -32,7 +32,7 @@ from os.path import exists
 from tqdm import tqdm
 from mask_generators import MaskGenerator
 
-# Colors, palette = phd.viz.phd_style(text=1)
+Colors, palette = phd.viz.phd_style(text=1)
 
 
 def delayCorrect(_dataTags):
@@ -130,6 +130,8 @@ def save_incrementor(dic):
 
 
 def load_snspd_and_clock_tags(file: str, path: str, snspd_ch: int, clock_ch: int, read_events = 1e9, debug= False):
+    # print(file)
+    # print(path)
     full_path = os.path.join(path, file)
     file_reader = FileReader(full_path)
     data = file_reader.getData(read_events)
@@ -198,10 +200,12 @@ def delay_analysis(channels, timetags, clock_channel, snspd_channel, stats, dela
     # delay = delayRange[np.argmax(dataNumbers)]
     plt.figure()
     plt.plot(delayRange, dataNumbers)
+    delay = delayRange[np.argmax(dataNumbers)]
     print("Max counts found at delay: ", delayRange[np.argmax(dataNumbers)])
+    print("You can update the analysis_params.yaml file with this delay and turn off delay_scan")
     plt.title("peak value is phase (ps) bewteen clock and SNSPD tags")
-    print("Offset time: ", delayRange[np.argmax(dataNumbers)])
-    return 0  # after
+    print("Offset time: ", delay)
+    return delay  # after
 
 
 def make_histogram(dataTags, nearestPulseTimes, delay, stats, Figures):
@@ -242,44 +246,67 @@ def calculate_diffs(data_tags, nearest_pulse_times, delay):
     return diffs
 
 
-def runAnalysisJit(path_, file_, modu_params, DERIV, PROP, delayScan=False, delay=0, Figures=True):
+# def runAnalysis(path_, file_, modu_params, analysis_params, DERIV, PROP, delayScan=False, delay=0, Figures=True):
+
+def runAnalysis(params):
+    Figures = params["show_figures"]
     print("starting analysis")
-    pulses_per_clock = modu_params["pulses_per_clock"]
+    pulses_per_clock = params["modulation_params"]["pulses_per_clock"]
     # get data set up
-    snspd_channel = -5
-    clock_channel = 9
+    snspd_channel = params["snspd_channel"]
+    clock_channel = params["clock_channel"]
     snspd_tags, clock_tags, channels, timetags = \
-        load_snspd_and_clock_tags(file_, path_, snspd_channel, clock_channel)
-    stats = data_statistics(modu_params, snspd_tags, clock_tags, debug=False)
+        load_snspd_and_clock_tags(params["data_file"],
+                                  params["data_path"],
+                                  params["snspd_channel"],
+                                  params["clock_channel"])
 
-    # optional delay analysi
-    if delayScan:  # to be done with a low detection rate file (high attentuation)
-        delay_analysis(channels, timetags, clock_channel, snspd_channel, stats, delay, DERIV, PROP)
+    stats = data_statistics(params["modulation_params"], snspd_tags, clock_tags, debug=False)
 
+    delay = params["delay"]
+    # optional delay analysis
+    if params["delay_scan"]:  # to be done with a low detection rate file (high attentuation)
+        delay = delay_analysis(channels, timetags, clock_channel, snspd_channel, stats, delay, DERIV, PROP)
+
+
+    print("prop: ", params["phase_locked_loop"]["prop"])
     # decode clocks and tags with correct delay
     clocks, recovered_clocks, data_tags, nearest_pulse_times, cycles = clockLock(
         channels,
         timetags,
-        clock_channel,
-        snspd_channel,
-        pulses_per_clock,
+        params["clock_channel"],
+        params["snspd_channel"],
+        params["modulation_params"]["pulses_per_clock"],
         delay,
-        window=0.50,
-        deriv=DERIV,
-        prop=PROP,
-        guardPeriod=600)
+        window=params["phase_locked_loop"]["window"],
+        deriv=params["phase_locked_loop"]["deriv"],
+        prop=params["phase_locked_loop"]["prop"],
+        guardPeriod=params["phase_locked_loop"]["guard_period"])
     print("clock lock finished")
     if Figures:
         checkLocking(clocks[2000:150000], recovered_clocks[2000:150000])
     make_histogram(data_tags, nearest_pulse_times, delay, stats, Figures)
 
-    diffs = calculate_diffs(data_tags, nearest_pulse_times, delay)
+    diffs = calculate_diffs(data_tags, nearest_pulse_times, delay) # returns diffs in nanoseconds
 
-    mask_manager = MaskGenerator(diffs, 200000, stats["inter_pulse_time"], figures=True)
-    # mask_manager.apply_mask_from_period()
+    mask_manager = MaskGenerator(diffs,
+                                 analysis_params["analysis_range"],
+                                 stats["inter_pulse_time"],
+                                 figures=True,
+                                 main_hist_downsample=1) # analysis out to 200 ns
+    if params["mask_method"] == 'from_period':
+        p = params["mask_from_period"]
+        mask_manager.apply_mask_from_period(p["adjustment_prop"],
+                                            p["adjustment_mult"],
+                                            p["bootstrap_errorbars"],
+                                            p["kde_bandwidth"],
+                                            p["low_cutoff"])
 
-    mask_manager.apply_mask_from_peaks(80)
-
+    elif params["mask_method"] == 'from_peaks':
+        mask_manager.apply_mask_from_peaks(params["mask_from_peaks"]["down_sample"])
+    else:
+        print("Unknown decoding method")
+        return 1
 
     # # Set up red plot
     # down_sample = 80
@@ -462,7 +489,7 @@ class RunAnalysisCopier(object):
 
     def __call__(self, file_iterator):
 
-        return runAnalysisJit(
+        return runAnalysis(
             self.Path,
             file_iterator,
             self.modu_params,
@@ -475,9 +502,12 @@ class RunAnalysisCopier(object):
 
 
 if __name__ == "__main__":
-    dBScan = False
-    LS = []
-    if dBScan:
+
+    with open("analysis_params.yaml", 'r') as f:
+        analysis_params = yaml.safe_load(f)["params"]
+
+    if analysis_params["analyze_set"]:
+        LS = []
         # ** this is very specific to the dataset collected on April 5
         dBlist = [i * 2 + 26 for i in range(21)]
         path = "..//data//537.5MHz_0.1s//"
@@ -499,19 +529,5 @@ if __name__ == "__main__":
             json.dump(LS, outfile, indent=4)
 
     else:
-        path = "C://Users//Andrew//Documents//peacoq_1_ghz//Wire_1//41mV"
-        file = "W1_41mV_3.0s_64.0.1.ttbin"
-        # params_file = "..//modu//custom_4ghz.yml"
-        # with open(params_file, 'r') as f:
-        #     modu_params = yaml.full_load(f)
+        runAnalysis(analysis_params)
 
-        modu_params = {"pulses_per_clock": 500, "pulse_rate": 1}
-        jitters = []
-        basic_jitters = []
-        voltages = []
-
-        fig, ax = plt.subplots()
-        # delay should be determined at a low count rate
-        dic = runAnalysisJit(path, file, modu_params, DERIV=500, PROP=1e-11, delayScan=False, delay=-204, Figures=True,)
-        # -160 delay for sets higher power than 80
-        # -140 delay for sets lower power than 80
