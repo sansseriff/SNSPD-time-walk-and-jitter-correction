@@ -3,6 +3,6 @@ message: "This code is meant to accompany the paper titled 'Time-walk and jitter
 authors:
   - family-names: Mueller
     given-names: Andrew
-title: "SNSPD time walk and jitter correction Software"
+title: "SNSPD time walk and jitter correction software"
 version: 1.0.0
 date-released: 2022-07-25

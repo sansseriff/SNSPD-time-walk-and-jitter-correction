@@ -1,0 +1,117 @@
+Output:
+  clock_gen: true
+  file_save: true
+  save_path: C://Users//Andrew//OneDrive - California Institute of Technology//JPL//.Jitterate//Aug21_data//Modu//537.5MHz2
+  save_type: bin8
+awg:
+  amplitude_multiplier: 1
+  max_sample_depth: 256
+cycles_per_sequence: 500
+fileName1: 0_21.08.27.13.24_CLK
+laser_time: 9.30232558139535e-11
+ppm:
+  2nd_channel_delay: 28700
+  data:
+    data_source: ext_img
+    img_data: .\rover_l.png
+    int_data:
+    - 0
+    - 200
+    - 12
+    - 0
+    - 4000
+    - 0
+    - 53
+    - 160
+    - 115
+    - 380
+    - 480
+    - 252
+    - 389
+    preamble_pulses: 8
+    str_data: '
+
+      To be, or not to be, that is the question.
+
+      Whether ''tis nobler in the mind to suffer
+
+      The slings and arrows of outrageous fortune,
+
+      Or to take arms against a sea of troubles
+
+      And by opposing end them. To die, to sleep,
+
+      No more; and by a sleep to say we end
+
+      The heart-ache and the thousand natural shocks
+
+      That flesh is heir to ''tis a consummation
+
+      Devoutly to be wish''d.
+
+      '
+  extension_mode: OP2
+  m_value: 1024
+  minimum_dead_time: 250
+  padding: 0
+pulse:
+  high_time: 0.2
+  sigma: 0.1
+pulses_per_cycle: 20
+regular:
+  2nd_channel_delay: 28700
+  data:
+    case_0-1: 1
+    case_1-0: 1
+    case_1-1: 0.5
+    data_source: int
+    int_data1:
+    - 1
+    - 0
+    - 1
+    - 1
+    - 0
+    - 1
+    - 0
+    - 1
+    - 1
+    - 0
+    - 1
+    - 1
+    - 0
+    - 1
+    - 0
+    - 0
+    - 0
+    int_data2:
+    - 1
+    - 0
+    - 1
+    - 0
+    - 0
+    - 1
+    - 1
+    - 1
+    - 0
+    - 1
+    - 0
+    - 1
+    - 0
+    - 0
+    - 1
+    - 0
+    - 1
+    pulse_divider: 20
+  extend_sequence: false
+  regular_mode: simple
+  simple_minimum_length: 500
+sample_rate: 86.0
+sample_time: 1.1627906976744187e-11
+system:
+  divider: 4
+  laser_rate: 10.75
+  mode: regular
+  sample_rate_override: -1
+  sync_rate: 2.6875
+total_pulses: 10000
+total_samples: 80000
