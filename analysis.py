@@ -133,11 +133,14 @@ def load_snspd_and_clock_tags(file: str, path: str, snspd_ch: int, clock_ch: int
     # print(path)
     full_path = os.path.join(path, file)
     file_reader = FileReader(full_path)
-    data = file_reader.getData(read_events)
+    print(type(read_events))
+    data = file_reader.getData(int(read_events))
     if debug:
         print("load_snspd_and_clock_tags: Size of the returned data chunk: {:d} events\n".format(data.size))
     channels = data.getChannels()
     timetags = data.getTimestamps()
+    print("length of timetags: ", len(timetags))
+
     SNSPD_tags = timetags[channels == snspd_ch]
     CLOCK_tags = timetags[channels == clock_ch]
     return SNSPD_tags, CLOCK_tags, channels, timetags
@@ -248,6 +251,10 @@ def calculate_diffs(data_tags, nearest_pulse_times, delay):
 # def runAnalysis(path_, file_, modu_params, analysis_params, DERIV, PROP, delayScan=False, delay=0, Figures=True):
 
 def runAnalysis(params):
+
+    t = time.time()
+    print("t1: ", t)
+
     Figures = params["show_figures"]
     print("starting analysis")
     pulses_per_clock = params["modulation_params"]["pulses_per_clock"]
@@ -258,17 +265,29 @@ def runAnalysis(params):
         load_snspd_and_clock_tags(params["data_file"],
                                   params["data_path"],
                                   params["snspd_channel"],
-                                  params["clock_channel"])
+                                  params["clock_channel"],
+                                  params["data_limit"])
+
+    print("t2: ", time.time() - t)
+    t = time.time()
 
     stats = data_statistics(params["modulation_params"], snspd_tags, clock_tags, debug=False)
 
     delay = params["delay"]
     # optional delay analysis
     if params["delay_scan"]:  # to be done with a low detection rate file (high attentuation)
-        delay = delay_analysis(channels, timetags, clock_channel, snspd_channel, stats, delay, DERIV, PROP)
+        delay = delay_analysis(channels,
+                               timetags,
+                               clock_channel,
+                               snspd_channel,
+                               stats,
+                               delay,
+                               params["phase_locked_loop"]["deriv"],
+                               params["phase_locked_loop"]["prop"])
 
+    print("type of params[phase_locked_loop][prop]: ", type(params["phase_locked_loop"]["prop"]))
 
-    print("prop: ", params["phase_locked_loop"]["prop"])
+    # print("prop: ", params["phase_locked_loop"]["prop"])
     # decode clocks and tags with correct delay
     clocks, recovered_clocks, data_tags, nearest_pulse_times, cycles = clockLock(
         channels,
@@ -281,31 +300,51 @@ def runAnalysis(params):
         deriv=params["phase_locked_loop"]["deriv"],
         prop=params["phase_locked_loop"]["prop"],
         guardPeriod=params["phase_locked_loop"]["guard_period"])
+
+    print("t3: ", time.time() - t)
+    t = time.time()
+
     print("clock lock finished")
     if Figures:
         checkLocking(clocks[2000:150000], recovered_clocks[2000:150000])
-    make_histogram(data_tags, nearest_pulse_times, delay, stats, Figures)
+
+    print('length of data tags: ', len(data_tags))
+    make_histogram(data_tags[:params["histogram_max_tags"]], nearest_pulse_times[:params["histogram_max_tags"]], delay, stats, Figures)
+
+
+    print("t4: ", time.time() - t)
+    t = time.time()
+
 
     diffs = calculate_diffs(data_tags, nearest_pulse_times, delay) # returns diffs in nanoseconds
+
+    print("t5: ", time.time() - t)
+    t = time.time()
+
 
     mask_manager = MaskGenerator(diffs,
                                  analysis_params["analysis_range"],
                                  stats["inter_pulse_time"],
-                                 figures=True,
+                                 figures=params["show_figures"],
                                  main_hist_downsample=1) # analysis out to 200 ns
+
+
+    print("t6: ", time.time() - t)
+    t = time.time()
+
     if params["mask_method"] == 'from_period':
-        p = params["mask_from_period"]
-        mask_manager.apply_mask_from_period(p["adjustment_prop"],
-                                            p["adjustment_mult"],
-                                            p["bootstrap_errorbars"],
-                                            p["kde_bandwidth"],
-                                            p["low_cutoff"])
+        mask_manager.apply_mask_from_period(params["mask_from_period"])
 
     elif params["mask_method"] == 'from_peaks':
-        mask_manager.apply_mask_from_peaks(params["mask_from_peaks"]["down_sample"])
+        mask_manager.apply_mask_from_peaks(params["mask_from_peaks"])
     else:
         print("Unknown decoding method")
         return 1
+
+
+
+    print("t7: ", time.time() - t)
+    t = time.time()
 
 def sleeper(t, iter, tbla=0):
     # time.sleep(t)
@@ -368,5 +407,6 @@ if __name__ == "__main__":
             json.dump(LS, outfile, indent=4)
 
     else:
+        print("t0: ", time.time())
         runAnalysis(analysis_params)
 

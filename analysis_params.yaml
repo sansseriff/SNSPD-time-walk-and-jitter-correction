@@ -1,6 +1,6 @@
 params:
   data_path: "C://Users//Andrew//Documents//peacoq_1_ghz//Wire_1//41mV"
-  data_file: "W1_41mV_3.0s_54.0.1.ttbin"
+  data_file: "W1_41mV_3.0s_42.0.1.ttbin"
   snspd_channel: -5
   clock_channel: 9
   show_figures: True
@@ -10,6 +10,8 @@ params:
   delay_scan: False #should the program search for initial estimate of the timing offset bewteen the clock and snspd tags
   delay: -204
   analyze_set: False # if true,
+  data_limit: 1.0e+6 #number of raw time tags to decode. Without the '+', yaml will parse this incorrectly as a string.
+  histogram_max_tags: 500000
 
   phase_locked_loop:
     deriv: 500
@@ -25,9 +27,10 @@ params:
   mask_from_period:
     adjustment_prop: 0.0
     adjustment_mult: 0.0
-    bootstrap_errorbars: False
+    bootstrap_errorbars: False # add errorbars using boostrap method to t' and FWHM plots. This is slow.
     kde_bandwidth: 0.0025 # amount of histogram smoothing in ps before measuring FWHM
     low_cutoff: 6 # number of periods at the very beginning to ignore
+    max_section_tags: 10000 # ignore more than this number of tags per unique t' (for making hists, median, FWHM)
   mask_from_peaks:
     down_sample: 8
 

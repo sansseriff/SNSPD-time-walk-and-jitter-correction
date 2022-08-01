@@ -4,18 +4,28 @@ import numba
 import math
 
 
-# This clock locking function takes in clock timetags on the clockChan variable, and data on the dataChan variable.
-# It distributes an accurate virtual clock to muliple times bewteen each clock.
-# reps is the number of distributed clocks per actual clock. (aka the frequency of laser pulses over clock frequency)
-# window is an area of time around each distributed clock time (pulse time) that is seached for timetags. Tags outside
-#       that range are discarded (this is useful for scanning for the phase offset of clock and snspd tags)
-# deriv: derivative parameter for the PLL
-# prop: proportional parameter for the PLL
-# guard period: number of actual clock tags that are used to let the PLL stabilize, but are not used for outputting data
-#       because the locked clock can oscillate a little at the beginning before it 'locks'
 
 @njit
 def clockLock(_channels,_timetags, clockChan, dataChan, pulses_per_clock, phase, window = 0.5, deriv = 1800, prop = 2e-12, guardPeriod = 0):
+    """
+    This clock locking function takes in clock timetags on the clockChan variable, and data on the dataChan variable.
+    It distributes an accurate virtual clock to muliple times bewteen each clock.
+    reps is the number of distributed clocks per actual clock. (aka the frequency of laser pulses over clock frequency)
+    window is an area of time around each distributed clock time (pulse time) that is seached for timetags. Tags outside
+    that range are discarded (this is useful for scanning for the phase offset of clock and snspd tags)
+    :param _channels:
+    :param _timetags:
+    :param clockChan:
+    :param dataChan:
+    :param pulses_per_clock: number of snspd/data tags per raw clock tag.
+    :param phase:
+    :param window:
+    :param deriv: the derivative parameter for the PLL
+    :param prop: the proportional parameter for the PLL
+    :param guardPeriod: number of actual clock tags that are used to let the PLL stabilize, but are not used for
+    outputting data because the locked clock can oscillate a little before it stabilizes.
+    :return:
+    """
     j = 0
     k = 0
     phi0 = 0
@@ -174,7 +184,8 @@ def agnostic_clock_lock(_channels,_timetags, clockChan, dataChan, pulses_per_clo
     return Clocks, RecoveredClocks, dataTags, nearestPulseTimes, Cycles, rel_clocks
 
 
-# used for real time phase locked loop
+# used for phase locked loop in real time Swabian software. Layout based on an example for a CustomMeasurment
+# from the Swabian documentation.
 class RepeatedPll():
     def __init__(self,
                  tags_per_cycle,
@@ -223,13 +234,6 @@ class RepeatedPll():
         starts = np.arange(0, len(self.timetags), self.tags_per_cycle)
         ends = np.roll(starts, -1)
         ends[-1] = len(self.timetags)
-
-        # refill the short buffers for passing to the jit function
-        # self.tags_buffer = np.zeros(self.tags_per_cycle)
-        # self.channels_buffer = np.zeros(self.tags_per_cycle)
-        # self.hist_buffer = np.zeros(self.tags_per_cycle)
-
-
         hist_idx = 0
         clock_idx = 0
 
