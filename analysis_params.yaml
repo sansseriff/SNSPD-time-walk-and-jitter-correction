@@ -1,6 +1,7 @@
 params:
+  do_calibration: False
   data_path: "C://Users//Andrew//Documents//peacoq_1_ghz//Wire_1//41mV"
-  data_file: "W1_41mV_3.0s_42.0.1.ttbin"
+  data_file: "W1_41mV_3.0s_46.0.1.ttbin"
   snspd_channel: -5
   clock_channel: 9
   show_figures: True
@@ -9,19 +10,20 @@ params:
   cal_curve_path: "./default_curve.json"
   delay_scan: False #should the program search for initial estimate of the timing offset bewteen the clock and snspd tags
   delay: -204
-  analyze_set: False # if true,
-  data_limit: 1.0e+6 #number of raw time tags to decode. Without the '+', yaml will parse this incorrectly as a string.
+  analyze_set: False # if true, TODO
+  data_limit: 1.0e+7 #number of raw time tags to decode. Without the '+', yaml will parse this incorrectly as a string.
   histogram_max_tags: 500000
 
   phase_locked_loop:
     deriv: 500
-    prop: 1.0e-11
+    prop: 1.0e-12
     window: 0.5
     guard_period: 600 # how much data to throw away at the beginning when PLL is stabilizing
 
   modulation_params:
     pulses_per_clock: 500
     pulse_rate: 1
+    # clock_rate is measured from the data file. Pulse rate is found by multiplying pulses_per_clock by clock_rate
 
   mask_method: "from_period" # options are "from_period" or "from_peaks"
   mask_from_period:
@@ -33,4 +35,18 @@ params:
     max_section_tags: 10000 # ignore more than this number of tags per unique t' (for making hists, median, FWHM)
   mask_from_peaks:
     down_sample: 8
+
+  output:
+    save_analysis_result: True
+    save_name: "calibration_results_"
+
+  correction:
+    do_correction: True
+    load_pre-generated_calibration: True
+    pre-generated_calibration:
+      path: ""
+      file: "calibration_results_02.08.2022_17.33.06.json"
+    spline_interpolation_resolution: 500 # controls the smoothing of the CubicSpline used for measuring FWHM, etc.
+
+
 
