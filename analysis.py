@@ -2,6 +2,7 @@ from TimeTagger import createTimeTagger, FileWriter, FileReader
 
 from time import sleep
 import matplotlib.pyplot as plt
+from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 import matplotlib
 import os
 import numpy as np
@@ -279,18 +280,42 @@ def calculate_diffs(data_tags, nearest_pulse_times, delay):
     return diffs
 
 
-def get_full_widths(x, y, level, analysis_range):
-    """
-    For finding FWHM, FW(1/10)M, etc.
-    :param x: x-axis, could be in ps
-    :param y: y-axis of response function
-    :param level: use (1/2) for FWHM, (1/10) for FW(1/10)M, (1/100) for FW(1/100)M
-    :param analysis_range: range inside the domain of x to search for roots, if less than x
-    :return: a list of roots
-    """
-    return validate_roots(
-        CubicSpline(x, y - max(y) * level).roots(), -analysis_range, analysis_range
-    )
+# def get_full_widths(x, y, level, analysis_range):
+#     """
+#     For finding FWHM, FW(1/10)M, etc. Returns dataObj with roots and level
+#     :param x: x-axis, could be in ps
+#     :param y: y-axis of response function
+#     :param level: use (1/2) for FWHM, (1/10) for FW(1/10)M, (1/100) for FW(1/100)M
+#     :param analysis_range: range inside the domain of x to search for roots, if less than x
+#     :return: a list of roots
+#     """
+#
+#     obj = DataObj()
+#     obj.roots = validate_roots(
+#         CubicSpline(x, y - max(y) * level).roots(), -analysis_range, analysis_range
+#     )
+#     obj.level = y.max() * level
+#     return obj
+
+
+class LineObj(DataObj):
+    def __init__(self, x, y, level, analysis_range, color, line_style, label=""):
+        self.x = x
+        self.y = y
+        self.level = level
+        self.analysis_range = analysis_range
+        self.color = color
+        self.line_style = line_style
+        self.root_list = validate_roots(
+            CubicSpline(x, y - max(y) * level).roots(),
+            -analysis_range,
+            analysis_range,
+        )
+        self.level = self.y.max() * self.level
+        self.label = label
+
+    def roots(self, index_1, index_2):
+        return self.root_list[index_1] - self.root_list[index_2]
 
 
 def validate_roots(roots, right_lim, left_lim):
@@ -352,16 +377,13 @@ def do_correction(d, r, data_tags, nearest_pulse_times, stats, params):
     r.hist_corrected, r.hist_bins = np.histogram(
         corrected_diffs, r.hist_bins, density=True
     )
-
-    plt.yscale("log")
-    plt.ylim(1e-6, 0.1)
-    plt.legend()
+    r.hist_bins = r.hist_bins[1:] - (r.hist_bins[1] - r.hist_bins[0]) / 2
 
     #############################
     if params["show_figures"]:
         fig, ax = plt.subplots(1, 1, figsize=(4, 3), dpi=275)
         ax.plot(
-            r.hist_bins[:-1],
+            r.hist_bins,
             r.hist_uncorrected,
             "--",
             color="black",
@@ -369,12 +391,12 @@ def do_correction(d, r, data_tags, nearest_pulse_times, stats, params):
             label="uncorrected data",
         )
         ax.plot(
-            r.hist_bins[:-1],
+            r.hist_bins,
             r.hist_corrected,
             color="black",
             label="corrected data",
         )
-        # ax.set_yscale('log')
+
         ax.grid(which="both")
         plt.legend()
         plt.title(
@@ -385,209 +407,180 @@ def do_correction(d, r, data_tags, nearest_pulse_times, stats, params):
 
     # resolution or smoothing of CubicSpline is determined by the resolution of these _interp arrays
     r.hist_bins_interp = np.linspace(
-        r.hist_bins[1],
+        r.hist_bins[0],
         r.hist_bins[-1],
-        params["spline_interpolation_resolution"],
-    )
-    r.hist_corrected_interp = np.interp(
-        r.hist_bins_interp, r.hist_bins[1:], r.hist_corrected
-    )
-    r.hist_uncorrected_interp = np.interp(
-        r.hist_bins_interp, r.hist_bins[1:], r.hist_uncorrected
+        params["correction"]["spline_interpolation_resolution"],
     )
 
-    spline_corrected = CubicSpline(r.hist_bins_interp, r.hist_corrected_interp)
-    spline_uncorrected = CubicSpline(r.hist_bins_interp, r.hist_uncorrected_interp)
-
-    r.fwhm_corrected = get_full_widths(
-        r.hist_bins_interp, r.hist_corrected_interp, 0.5, 500
+    # lower res histograms to be used with CubicSpline
+    r.hist_corrected_interp, r.hist_bins_interp = np.histogram(
+        corrected_diffs, r.hist_bins_interp, density=True
     )
-    r.fwhm_uncorrected = get_full_widths(
-        r.hist_bins_interp, r.hist_uncorrected_interp, 0.5, 500
+    r.hist_uncorrected_interp, r.hist_bins_interp = np.histogram(
+        uncorrected_diffs, r.hist_bins_interp, density=True
     )
 
-    r.fwtm_corrected = get_full_widths(
-        r.hist_bins_interp, r.hist_corrected_interp, 1 / 10, 500
-    )
-    r.fwtm_uncorrected = get_full_widths(
-        r.hist_bins_interp, r.hist_uncorrected_interp, 1 / 10, 500
+    r.hist_bins_interp = (
+        r.hist_bins_interp[1:] - (r.hist_bins_interp[1] - r.hist_bins_interp[0]) / 2
     )
 
-    r.fwhum_corrected = get_full_widths(
-        r.hist_bins_interp, r.hist_corrected_interp, 1 / 100, 500
+    spline_corrected = CubicSpline(
+        r.hist_bins_interp,
+        r.hist_corrected_interp,
     )
-    r.fwhum_uncorrected = get_full_widths(
-        r.hist_bins_interp, r.hist_uncorrected_interp, 1 / 100, 500
+    spline_uncorrected = CubicSpline(
+        r.hist_bins_interp,
+        r.hist_uncorrected_interp,
     )
 
-    print("FWHM corrected: ", r.fwhm_corrected[-1] - r.fwhm_corrected[-2])
-    print("FWTM corrected: ", r.fwtm_corrected[-1] - r.fwtm_corrected[-2])
-    print("FW100M corrected: ", r.fwhum_corrected[-1] - r.fwhum_corrected[-2])
+    r.fwhm_corrected = LineObj(
+        r.hist_bins_interp,
+        r.hist_corrected_interp,
+        0.5,
+        500,
+        "#eb4034",
+        "-",
+        label="FWHM corrected",
+    )
+    r.fwhm_uncorrected = LineObj(
+        r.hist_bins_interp,
+        r.hist_uncorrected_interp,
+        0.5,
+        500,
+        "#eb4034",
+        "--",
+        label="FWHM uncorrected",
+    )
 
-    print("FWHM uncorrected: ", r.fwhm_uncorrected[-1] - r.fwhm_uncorrected[-2])
-    print("FWTM uncorrected: ", r.fwtm_uncorrected[-1] - r.fwtm_uncorrected[-2])
-    print("FW100M uncorrected: ", r.fwhum_uncorrected[-2] - r.fwhum_uncorrected[0])
+    r.fwtm_corrected = LineObj(
+        r.hist_bins_interp,
+        r.hist_corrected_interp,
+        1 / 10,
+        500,
+        "#c92eb2",
+        "-",
+        label="FW(1/10)M corrected",
+    )
+    r.fwtm_uncorrected = LineObj(
+        r.hist_bins_interp,
+        r.hist_uncorrected_interp,
+        1 / 10,
+        500,
+        "#c92eb2",
+        "--",
+        label="FW(1/10)M uncorrected",
+    )
+
+    r.fwhum_corrected = LineObj(
+        r.hist_bins_interp,
+        r.hist_corrected_interp,
+        1 / 100,
+        500,
+        "#3d2ec9",
+        "-",
+        label="FW(1/100)M corrected",
+    )
+    r.fwhum_uncorrected = LineObj(
+        r.hist_bins_interp,
+        r.hist_uncorrected_interp,
+        1 / 100,
+        500,
+        "#3d2ec9",
+        "--",
+        label="FW(1/100)M uncorrected",
+    )
+
+    print("FWHM corrected: ", r.fwhm_corrected.roots(-1, 0))
+    print("FWTM corrected: ", r.fwtm_corrected.roots(-1, 0))
+    print("FW100M corrected: ", r.fwhum_corrected.roots(-1, 0))
+    print()
+    print("FWHM uncorrected: ", r.fwhm_uncorrected.roots(-1, 0))
+    print("FWTM uncorrected: ", r.fwtm_uncorrected.roots(-1, 0))
+    print("FW100M uncorrected: ", r.fwhum_uncorrected.roots(-1, 0))
 
     if params["show_figures"]:
         fig, ax = plt.subplots(1, 1, figsize=(7, 3.5))
 
-        half_c = "#eb4034"
-        tenth_c = "#c92eb2"
-        hundreth_c = "#3d2ec9"
-
         ax.plot(
-            r.hist_bins[1:],
+            r.hist_bins,
             r.hist_uncorrected,
             label="uncorrected raw data",
             alpha=0.3,
+            color="orange",
         )
         ax.plot(
-            r.hist_bins[1:],
+            r.hist_bins,
             r.hist_corrected,
             label="corrected raw data",
             alpha=0.3,
         )
-
-        title = f"count rate: {number_manager(stats['count_rate'])}"
-        ax.set_title(title)
         ax.plot(
-            r.hist_bins[1:],
-            spline_corrected(r.hist_bins[1:]),
+            r.hist_bins,
+            spline_corrected(r.hist_bins),
             "k",
             alpha=1,
             label="cubic spline corrected",
         )
         ax.plot(
-            r.hist_bins[1:],
-            spline_uncorrected(r.hist_bins[1:]),
+            r.hist_bins,
+            spline_uncorrected(r.hist_bins),
             "k",
             alpha=0.3,
             label="cubic spline uncorrected",
             ls="--",
         )
+        title = f"count rate: {number_manager(stats['count_rate'])}"
+        ax.set_title(title)
 
-        data.array_cs_corrected = spline_corrected(data.guassBins[1:])
-        data.array_cs_uncorrected = spline_uncorrected(data.guassBins[1:])
+        r.hist_spline_corrected = spline_corrected(r.hist_bins)
+        r.hist_spline_uncorrected = spline_uncorrected(r.hist_bins)
 
-        label = f"FWHM corrected: {round(data.roots_fw_half_c[-1] - data.roots_fw_half_c[-2], 1)} ps"
-        ax.hlines(
-            max(data.shorty_corrected) / 2,
-            data.roots_fw_half_c[-1],
-            data.roots_fw_half_c[-2],
-            label=label,
-            color=half_c,
-        )
-        label = f"FWHM uncorrected: {round(data.roots_fw_half_u[-1] - data.roots_fw_half_u[-2], 1)} ps"
-        ax.hlines(
-            max(data.shorty_uncorrected) / 2,
-            data.roots_fw_half_u[-1],
-            data.roots_fw_half_u[-2],
-            label=label,
-            color=half_c,
-            ls="--",
-        )
+        line_objs = [
+            r.fwhm_uncorrected,
+            r.fwtm_uncorrected,
+            r.fwhum_uncorrected,
+            r.fwhm_corrected,
+            r.fwtm_corrected,
+            r.fwhum_corrected,
+        ]
 
-        label = f"FW(1/10)M corrected: {round(data.roots_fw_tenth_c[-1] - data.roots_fw_tenth_c[-2], 1)} ps"
-        ax.hlines(
-            max(data.shorty_corrected) / 10,
-            data.roots_fw_tenth_c[-1],
-            data.roots_fw_tenth_c[-2],
-            label=label,
-            color=tenth_c,
-        )
-        label = f"FW(1/10)M uncorrected: {round(data.roots_fw_tenth_u[-1] - data.roots_fw_tenth_u[-2], 1)} ps"
-        ax.hlines(
-            max(data.shorty_uncorrected) / 10,
-            data.roots_fw_tenth_u[-1],
-            data.roots_fw_tenth_u[-2],
-            label=label,
-            color=tenth_c,
-            ls="--",
-        )
-
-        label = f"FW(1/100)M corrected: {round(data.roots_fw_hundreth_c[-1] - data.roots_fw_hundreth_c[-2], 1)} ps"
-        ax.hlines(
-            max(data.shorty_corrected) / 100,
-            data.roots_fw_hundreth_c[-1],
-            data.roots_fw_hundreth_c[-2],
-            label=label,
-            color=hundreth_c,
-        )
-        print(data.roots_fw_hundreth_u)
-
-        ################
-        label = f"FW(1/100)M uncorrected: {round(data.roots_fw_hundreth_u[-2] - data.roots_fw_hundreth_u[0], 1)} ps"
-        ax.hlines(
-            max(data.shorty_uncorrected) / 100,
-            data.roots_fw_hundreth_u[-2],
-            data.roots_fw_hundreth_u[0],
-            label=label,
-            color=hundreth_c,
-            ls="--",
-        )
-        ################
-
+        for line_obj in line_objs:
+            label = f"{line_obj.label} {round(line_obj.roots(-1, 0), 1)} ps"
+            ax.hlines(
+                line_obj.level,
+                line_obj.root_list[-1],
+                line_obj.root_list[0],
+                label=label,
+                color=line_obj.color,
+                ls=line_obj.line_style,
+            )
         ax.grid()
-        ax.set_xlim(-460, 200)
+        ax.set_xlim(-edge, edge)
         ax.set_xlabel("time (ps)")
         ax.set_ylabel("normalized counts")
-        plt.legend(fancybox=True, frameon=False)
+        plt.legend(fancybox=True, frameon=False, loc="upper left")
         ax.set_yscale("log")
         ax.set_ylim(1e-6, 0.1)
+
         ax_lin = inset_axes(ax, width="30%", height=1, loc=1)
+        ax_lin.plot(r.hist_bins, spline_corrected(r.hist_bins), "k", alpha=1)
         ax_lin.plot(
-            data.guassBins[1:], spline_corrected(data.guassBins[1:]), "k", alpha=1
-        )
-        ax_lin.plot(
-            data.guassBins[1:],
-            spline_uncorrected(data.guassBins[1:]),
+            r.hist_bins,
+            spline_uncorrected(r.hist_bins),
             "k",
             alpha=0.3,
             ls="--",
         )
+        ax_lin.set_xlim(-edge, edge)
 
-        ax_lin.hlines(
-            max(data.shorty_corrected) / 2,
-            data.roots_fw_half_c[-1],
-            data.roots_fw_half_c[-2],
-            color=half_c,
-        )
-        ax_lin.hlines(
-            max(data.shorty_uncorrected) / 2,
-            data.roots_fw_half_u[-1],
-            data.roots_fw_half_u[-2],
-            color=half_c,
-            ls="--",
-        )
-        ax_lin.hlines(
-            max(data.shorty_corrected) / 10,
-            data.roots_fw_tenth_c[-1],
-            data.roots_fw_tenth_c[-2],
-            color=tenth_c,
-        )
-        ax_lin.hlines(
-            max(data.shorty_uncorrected) / 10,
-            data.roots_fw_tenth_u[-1],
-            data.roots_fw_tenth_u[-2],
-            color=tenth_c,
-            ls="--",
-        )
-        ax_lin.hlines(
-            max(data.shorty_corrected) / 100,
-            data.roots_fw_hundreth_c[-1],
-            data.roots_fw_hundreth_c[-2],
-            color=hundreth_c,
-        )
-        ax_lin.hlines(
-            max(data.shorty_uncorrected) / 100,
-            data.roots_fw_hundreth_u[-1],
-            data.roots_fw_hundreth_u[-2],
-            color=hundreth_c,
-            ls="--",
-        )
+        if params["correction"]["output"]["save_fig"]:
+            save_name = params["data_file"][:-10] + ".png"
+            save_name = os.path.join(
+                params["correction"]["output"]["save_location"], save_name
+            )
+            plt.savefig(save_name)
 
-        ax_lin.set_xlim(-150, 150)
-        ax_lin.grid()
+        return r
 
 
 def run_analysis(params):
@@ -645,9 +638,6 @@ def run_analysis(params):
         Figures,
     )
 
-    # do_analysis = True
-    # do_correction = True
-
     if params["do_calibration"]:
         cal_results_obj = DataObj()  # for storing results of calibration
         cal_results_obj.stats = stats
@@ -663,7 +653,7 @@ def run_analysis(params):
             stats["inter_pulse_time"],
             figures=params["show_figures"],
             main_hist_downsample=1,
-        )
+        )  # used to separate out the data into discrete distributions for each t'
 
         if params["mask_method"] == "from_period":
             cal_results_obj = mask_manager.apply_mask_from_period(
@@ -704,8 +694,9 @@ def run_analysis(params):
                 )
                 return 1
 
+        # should I loop over correction files here? No, you need to load multiple files...
         corr_results_obj = DataObj()
-        do_correction(
+        corr_results_obj = do_correction(
             calibration_obj,
             corr_results_obj,
             data_tags,
@@ -713,6 +704,10 @@ def run_analysis(params):
             stats,
             params,
         )
+
+        if params["correction"]["output"]["save_correction_result"]:
+
+            corr_results_obj.export()
 
         # rep rate of the calibration set may be different than that of the corrected set.
 
@@ -755,34 +750,33 @@ if __name__ == "__main__":
     with open("analysis_params.yaml", "r") as f:
         analysis_params = yaml.safe_load(f)["params"]
 
-    if analysis_params["analyze_set"]:
-        LS = []
-        # ** this is very specific to the dataset collected on April 5
-        dBlist = [i * 2 + 26 for i in range(21)]
-        path = "..//data//537.5MHz_0.1s//"
-        file_list = [
-            "jitterate_537.5MHz_-.025V_" + str(dB) + ".0.1.ttbin" for dB in dBlist
-        ]
-        params_file = "..//modu//537.5MHz//0_21.08.27.13.24_params.yml"
-        with open(params_file, "r") as f:
-            modu_params = yaml.full_load(f)
-        sleep_list = [(1.05**i) for i in range(10)]
-        with concurrent.futures.ProcessPoolExecutor(max_workers=4) as executor:
-            dictList = executor.map(
-                R(path, modu_params, 200000, 1e-14, False, -230, False),
-                file_list,
-            )
-            # takes 10 - 20 minutes on 16 threads
-        LS = []
-        for dB, item in zip(dBlist, dictList):
-            print(item)
-            item["dB"] = dB
-            LS.append(item)
-        today_now = datetime.now().strftime("%y.%m.%d.%H.%M")
-        with open(
-            "jitterate_swabianHighRes_537.5MHz_" + today_now + ".json", "w"
-        ) as outfile:
-            json.dump(LS, outfile, indent=4)
+    # if analysis_params["correction"]["analyze_set"]:
+    #     LS = []
+    #     # ** this is very specific to the dataset collected on April 5
+    #     dBlist = [i * 2 + 26 for i in range(21)]
+    #     path = "..//data//537.5MHz_0.1s//"
+    #     file_list = [
+    #         "jitterate_537.5MHz_-.025V_" + str(dB) + ".0.1.ttbin" for dB in dBlist
+    #     ]
+    #     params_file = "..//modu//537.5MHz//0_21.08.27.13.24_params.yml"
+    #     with open(params_file, "r") as f:
+    #         modu_params = yaml.full_load(f)
+    #     sleep_list = [(1.05**i) for i in range(10)]
+    #     with concurrent.futures.ProcessPoolExecutor(max_workers=4) as executor:
+    #         dictList = executor.map(
+    #             R(path, modu_params, 200000, 1e-14, False, -230, False),
+    #             file_list,
+    #         )
+    #         # takes 10 - 20 minutes on 16 threads
+    #     LS = []
+    #     for dB, item in zip(dBlist, dictList):
+    #         print(item)
+    #         item["dB"] = dB
+    #         LS.append(item)
+    #     today_now = datetime.now().strftime("%y.%m.%d.%H.%M")
+    #     with open(
+    #         "jitterate_swabianHighRes_537.5MHz_" + today_now + ".json", "w"
+    #     ) as outfile:
+    #         json.dump(LS, outfile, indent=4)
 
-    else:
-        run_analysis(analysis_params)
+    run_analysis(analysis_params)  # do the looping over data files in here.

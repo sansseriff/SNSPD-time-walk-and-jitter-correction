@@ -1,6 +1,7 @@
 *.json
 *.ipynb
 *.html
+*.png
 
 .idea/
 __pycache__/

@@ -1,16 +1,13 @@
 params:
   do_calibration: False
-  data_path: "C://Users//Andrew//Documents//peacoq_1_ghz//Wire_1//41mV"
-  data_file: "W1_41mV_3.0s_46.0.1.ttbin"
-  snspd_channel: -5
-  clock_channel: 9
-  show_figures: True
+  data_path: "C://Users//Andrew//Documents//peacoq_1_ghz//Wire_1//41mV" ##
+  data_file: "W1_41mV_3.0s_65.0.1.ttbin" ##
+  snspd_channel: -5 ##
+  clock_channel: 9 ##
+  show_figures: True ##
   analysis_range: 200000 #picoseconds
-  use_existing_cal_curve: False
-  cal_curve_path: "./default_curve.json"
   delay_scan: False #should the program search for initial estimate of the timing offset bewteen the clock and snspd tags
   delay: -204
-  analyze_set: False # if true, TODO
   data_limit: 1.0e+7 #number of raw time tags to decode. Without the '+', yaml will parse this incorrectly as a string.
   histogram_max_tags: 500000
 
@@ -42,11 +39,20 @@ params:
 
   correction:
     do_correction: True
+    analyze_set: False # if True, the data path at the top will be ignored
+    set_path: 
+
     load_pre-generated_calibration: True
     pre-generated_calibration:
       path: ""
       file: "calibration_results_02.08.2022_17.33.06.json"
-    spline_interpolation_resolution: 500 # controls the smoothing of the CubicSpline used for measuring FWHM, etc.
+
+    spline_interpolation_resolution: 200 # controls the smoothing of the CubicSpline used for measuring FWHM, etc.
+
+    output:
+      save_fig: True
+      save_correction_result: True
+      save_location: "./results_8.5.2022"
 
 
 
