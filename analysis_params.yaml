@@ -1,58 +1,74 @@
 params:
-  do_calibration: False
-  data_path: "C://Users//Andrew//Documents//peacoq_1_ghz//Wire_1//41mV" ##
-  data_file: "W1_41mV_3.0s_65.0.1.ttbin" ##
-  snspd_channel: -5 ##
-  clock_channel: 9 ##
-  show_figures: True ##
-  analysis_range: 200000 #picoseconds
-  delay_scan: False #should the program search for initial estimate of the timing offset bewteen the clock and snspd tags
-  delay: -204
-  data_limit: 1.0e+7 #number of raw time tags to decode. Without the '+', yaml will parse this incorrectly as a string.
-  histogram_max_tags: 500000
+  view:
+    show_figures: True
 
-  phase_locked_loop:
-    deriv: 500
-    prop: 1.0e-12
-    window: 0.5
-    guard_period: 600 # how much data to throw away at the beginning when PLL is stabilizing
+### Data params
+  data:
+    view:
+      show_figures: True
+      histogram_max_tags: 500000
+    data_path: "C://Users//Andrew//Documents//peacoq_1_ghz//Wire_16//43mV_14.0uA"
+    data_file: "W16_43mV_1.5s_12.4uA_60.0.1.ttbin"
+    snspd_channel: -5
+    clock_channel: 9
+    data_limit: 1.0e+7 #number of raw time tags to decode. Without the '+', yaml will parse this incorrectly as a string.
+    delay_scan: False #should the program search for initial estimate of the timing offset bewteen the clock and snspd tags
+    delay: -254 #restuls of the delay scan can be pasted here
+    modulation_params:
+      pulses_per_clock: 500 # number of attenuated laser pulses per clock tag
+      # clock_rate is measured from the data file. Pulse rate is found by multiplying pulses_per_clock by clock_rate
+    phase_locked_loop:
+      deriv: 30000
+      prop: 1.0e-15
+      window: 0.95 # defines a time window around each laser pulse time. (ratio of laser period)
+      # tags arriving inside the window are used. tags outside are rejected
+      guard_period: 100000 # how much data to throw away at the beginning when PLL is stabilizing
 
-  modulation_params:
-    pulses_per_clock: 500
-    pulse_rate: 1
-    # clock_rate is measured from the data file. Pulse rate is found by multiplying pulses_per_clock by clock_rate
 
-  mask_method: "from_period" # options are "from_period" or "from_peaks"
-  mask_from_period:
-    adjustment_prop: 0.0
-    adjustment_mult: 0.0
-    bootstrap_errorbars: False # add errorbars using boostrap method to t' and FWHM plots. This is slow.
-    kde_bandwidth: 0.0025 # amount of histogram smoothing in ps before measuring FWHM
-    low_cutoff: 6 # number of periods at the very beginning to ignore
-    max_section_tags: 10000 # ignore more than this number of tags per unique t' (for making hists, median, FWHM)
-  mask_from_peaks:
-    down_sample: 8
 
-  output:
-    save_analysis_result: True
-    save_name: "calibration_results_"
+### Calibration
+  do_calibration: True
+  calibration:
+    view:
+      show_figures: True
+    analysis_range: 200000 #picoseconds
+    mask_method: "from_period" # options are "from_period" or "from_peaks"
+    mask_from_period:
+      adjustment_prop: 0.0
+      adjustment_mult: 0.0
+      bootstrap_errorbars: False # add errorbars using boostrap method to t' and FWHM plots. This is slow.
+      kde_bandwidth: 0.0025 # amount of histogram smoothing in ps before measuring FWHM
+      low_cutoff: 6 # number of periods at the very beginning to ignore
+      max_section_tags: 10000 # ignore more than this number of tags per unique t' (for making hists, median, FWHM)
+    mask_from_peaks:
+      down_sample: 8
 
+    output: # should go in calibration
+      save_analysis_result: True
+      save_name: "./peacoq_results//Wire_16//43mV_14.0uA//calibration_results_"
+
+
+  ### Correction
+  do_correction: False
   correction:
-    do_correction: True
-    analyze_set: False # if True, the data path at the top will be ignored
-    set_path: 
-
+    view:
+      show_figures: True
     load_pre-generated_calibration: True
     pre-generated_calibration:
-      path: ""
-      file: "calibration_results_02.08.2022_17.33.06.json"
+      path: "./peacoq_results//Wire_16//43mV_14.0uA//"
+      file: "calibration_results_10.08.2022_15.17.29.json"
+
+    correct_multiple_files: False # if True, the data path at the top will be ignored
+    multiple_files_path: "C://Users//Andrew//Documents//peacoq_1_ghz//Wire_16//43mV_14.0uA"
 
     spline_interpolation_resolution: 200 # controls the smoothing of the CubicSpline used for measuring FWHM, etc.
 
     output:
       save_fig: True
       save_correction_result: True
-      save_location: "./results_8.5.2022"
+      save_location: "./peacoq_results//Wire_16//43mV_14.0uA//" # a single or multiple correction result files will go here.
+      save_name: "corrected_results_"
+      data_file_snip: [0,-8] # defines snip of data file name that's included in results file
 
 
 

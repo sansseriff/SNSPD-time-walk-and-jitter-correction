@@ -2,7 +2,7 @@ import orjson
 import numpy as np
 from datetime import datetime
 
-'''
+"""
 A custom class for making data objects that are easily exported/imported as json. Uses orjson for fast export and 
 import of numpy arrays. 
 
@@ -11,32 +11,38 @@ The export and import methods can handle DataObj objects inside other DataObj ob
 Why not just use the pickle library? 
 --> Answer: Json is a more universal format than python pickle. The exports from this library could be parsed by Matlab, 
 Javascript, etc. The use of orjson here should also make this much faster than python pickle for large datasets. 
-'''
+"""
 
 
 class DataObj:
-    def __init__(self, name = None, dic=None):
+    def __init__(self, name=None, dic=None):
         if name is not None:
             self.load_file(name)
         if dic is not None:
             self.load_dic(dic)
 
-    def export(self, name, include_time = False, print_info = False):
+    def export(
+        self, name, include_time=False, print_info=False, include_time_inside=False
+    ):
         dic = self.export_dic()
-        strb = orjson.dumps(dic, option=orjson.OPT_SERIALIZE_NUMPY)
         if include_time:
             now = datetime.now()
             dt_string = now.strftime("%d.%m.%Y_%H.%M.%S")
             name = name + dt_string
-        if name[-5:] != '.json':
-            name = name + '.json'
-        with open(name,'wb') as file:
+        if include_time_inside:
+            now = datetime.now()
+            dt_string = now.strftime("%d.%m.%Y_%H.%M.%S")
+            dic["date_time"] = dt_string
+        strb = orjson.dumps(dic, option=orjson.OPT_SERIALIZE_NUMPY)
+        if name[-5:] != ".json":
+            name = name + ".json"
+        with open(name, "wb") as file:
             file.write(strb)
         if print_info:
             print("Saving data as: ", name)
 
     def load_file(self, name):
-        with open(name, 'rb') as file:
+        with open(name, "rb") as file:
             strb = file.read()
         self.load_dic(orjson.loads(strb))
         print(self.__dict__.keys())
@@ -70,28 +76,43 @@ class DataObj:
         dic = self.__dict__
         dic_2 = dic.copy()
         for key in dic.keys():
-            if type(dic[key]) is type(self):
+            # print(type(dic[key]))
+
+            # print(issubclass(dic[key].__class__, type(self)))
+            # print(issubclass(type(dic[key]), type(self)))
+            # print("###########")
+            # print(type(self))
+            # print(type(dic[key]))
+            # print(issubclass(type(dic[key]), type(self)))
+            #
+            # print("###########")
+            # print(dic[key].__bases__)
+            if (type(dic[key]) is type(self)) or issubclass(type(dic[key]), type(self)):
                 # dic[key] = dic[key].export_dic()
                 json_tool_dic = dic[key].export_dic()
                 del dic_2[key]
                 new_key = str(key) + "_do"
                 dic_2[new_key] = json_tool_dic
 
-            if (type(dic[key]) is list) and (type(dic[key][0]) is type(self)):
+            if (type(dic[key]) is list) and (
+                (type(dic[key][0]) is type(self))
+                or issubclass(type(dic[key][0]), type(self))
+            ):
                 ls = []
                 for i, item in enumerate(dic[key]):
-                        ls.append(dic[key][i].export_dic())
+                    ls.append(dic[key][i].export_dic())
 
                 del dic_2[key]
                 new_key = str(key) + "_do"
                 dic_2[new_key] = ls
         return dic_2
 
+
 # would be cool if this could overload the list functionality if I only wanted to use this object as a list.
 # right now it does not encode lists of numpy arrays correctly.
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     # create a DataObj with various things inside, including a list of DataObj, a single DataObj,
     # and an extra numpy array.
     parent = DataObj()
@@ -100,12 +121,16 @@ if __name__ == '__main__':
         struct = DataObj()
         struct.item = "this is an item"
         struct.dB = f"{i} dB"
-        struct.ls = [np.array([3, 34, 2, 43]),np.array([3, 34, 2, 43]),np.array([3, 34, 2, 43])]
+        struct.ls = [
+            np.array([3, 34, 2, 43]),
+            np.array([3, 34, 2, 43]),
+            np.array([3, 34, 2, 43]),
+        ]
         struct.arr = np.array([23, 2, 34, 2, 43, 3, 4.433])
         parent.items.append(struct)
     parent.extraObj = DataObj()
     parent.extraObj.item = "this is an item inside an nested DataObj"
-    parent.numpy = np.array([3,54,3,45,2,5,7,3])
+    parent.numpy = np.array([3, 54, 3, 45, 2, 5, 7, 3])
     # export
     parent.export("try_this.json")
 
@@ -121,7 +146,3 @@ if __name__ == '__main__':
     print()
     print([parent_2.items[i].dB for i in range(10)])
     print([parent_2.items[i].arr for i in range(10)])
-
-
-
-

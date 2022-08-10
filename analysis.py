@@ -128,9 +128,8 @@ def getCountRate(path_, file_):
 
 
 def load_snspd_and_clock_tags(
-    file: str, path: str, snspd_ch: int, clock_ch: int, read_events=1e9, debug=False
+    full_path, snspd_ch: int, clock_ch: int, read_events=1e9, debug=False
 ):
-    full_path = os.path.join(path, file)
     file_reader = FileReader(full_path)
     data = file_reader.getData(int(read_events))
     if debug:
@@ -300,8 +299,6 @@ def calculate_diffs(data_tags, nearest_pulse_times, delay):
 
 class LineObj(DataObj):
     def __init__(self, x, y, level, analysis_range, color, line_style, label=""):
-        self.x = x
-        self.y = y
         self.level = level
         self.analysis_range = analysis_range
         self.color = color
@@ -311,7 +308,7 @@ class LineObj(DataObj):
             -analysis_range,
             analysis_range,
         )
-        self.level = self.y.max() * self.level
+        self.level = y.max() * self.level
         self.label = label
 
     def roots(self, index_1, index_2):
@@ -338,11 +335,12 @@ def number_manager(number):
     return val
 
 
-def do_correction(d, r, data_tags, nearest_pulse_times, stats, params):
-    delta_ts = data_tags - np.roll(data_tags, 1)
+def do_correction(corr_params, calibration_obj, data):
+    r = DataObj()  # results object
+    delta_ts = data.data_tags - np.roll(data.data_tags, 1)
     delta_ts = delta_ts[1:-1] / 1000  # now in nanoseconds
-    data_tags = data_tags[1:-1]
-    nearest_pulse_times = nearest_pulse_times[1:-1]
+    data_tags = data.data_tags[1:-1]
+    nearest_pulse_times = data.nearest_pulse_times[1:-1]
 
     plt.figure()
     hist, bins = np.histogram(delta_ts, bins=500)
@@ -351,7 +349,7 @@ def do_correction(d, r, data_tags, nearest_pulse_times, stats, params):
 
     # GENERATE SHIFTS
     shifts = 1000 * np.interp(
-        delta_ts, d.t_prime, d.offsets
+        delta_ts, calibration_obj.t_prime, calibration_obj.offsets
     )  # in picoseconds. Remove the 1st couple data
 
     plt.figure()
@@ -365,7 +363,7 @@ def do_correction(d, r, data_tags, nearest_pulse_times, stats, params):
     uncorrected_diffs = data_tags - nearest_pulse_times
     corrected_diffs = corrected_tags - nearest_pulse_times
 
-    edge = int(stats["inter_pulse_time"] * 1000 / 2)
+    edge = int(data.stats["inter_pulse_time"] * 1000 / 2)
     const_offset = uncorrected_diffs.min()
     uncorrected_diffs = uncorrected_diffs - const_offset - edge  # cancel offset
     corrected_diffs = corrected_diffs - const_offset - edge
@@ -380,7 +378,7 @@ def do_correction(d, r, data_tags, nearest_pulse_times, stats, params):
     r.hist_bins = r.hist_bins[1:] - (r.hist_bins[1] - r.hist_bins[0]) / 2
 
     #############################
-    if params["show_figures"]:
+    if corr_params["view"]["show_figures"]:
         fig, ax = plt.subplots(1, 1, figsize=(4, 3), dpi=275)
         ax.plot(
             r.hist_bins,
@@ -400,16 +398,18 @@ def do_correction(d, r, data_tags, nearest_pulse_times, stats, params):
         ax.grid(which="both")
         plt.legend()
         plt.title(
-            f"count rate: {parse_count_rate(stats['count_rate'])}, data_file: {params['data_file']}"
+            f"count rate: {parse_count_rate(data.stats['count_rate'])}, "
+            f"data_file: {data.params['data_file']}"
         )
         ax.set_xlabel("time (ps)")
         ax.set_ylabel("counts (ps)")
 
-    # resolution or smoothing of CubicSpline is determined by the resolution of these _interp arrays
+    # resolution or smoothing of CubicSpline is determined by the resolution
+    # of these _interp arrays
     r.hist_bins_interp = np.linspace(
         r.hist_bins[0],
         r.hist_bins[-1],
-        params["correction"]["spline_interpolation_resolution"],
+        corr_params["spline_interpolation_resolution"],
     )
 
     # lower res histograms to be used with CubicSpline
@@ -498,7 +498,7 @@ def do_correction(d, r, data_tags, nearest_pulse_times, stats, params):
     print("FWTM uncorrected: ", r.fwtm_uncorrected.roots(-1, 0))
     print("FW100M uncorrected: ", r.fwhum_uncorrected.roots(-1, 0))
 
-    if params["show_figures"]:
+    if corr_params["view"]["show_figures"]:
         fig, ax = plt.subplots(1, 1, figsize=(7, 3.5))
 
         ax.plot(
@@ -529,7 +529,7 @@ def do_correction(d, r, data_tags, nearest_pulse_times, stats, params):
             label="cubic spline uncorrected",
             ls="--",
         )
-        title = f"count rate: {number_manager(stats['count_rate'])}"
+        title = f"count rate: {number_manager(data.stats['count_rate'])}"
         ax.set_title(title)
 
         r.hist_spline_corrected = spline_corrected(r.hist_bins)
@@ -573,36 +573,58 @@ def do_correction(d, r, data_tags, nearest_pulse_times, stats, params):
         )
         ax_lin.set_xlim(-edge, edge)
 
-        if params["correction"]["output"]["save_fig"]:
-            save_name = params["data_file"][:-10] + ".png"
-            save_name = os.path.join(
-                params["correction"]["output"]["save_location"], save_name
-            )
+        if corr_params["output"]["save_fig"]:
+            rg = corr_params["output"]["data_file_snip"]
+            save_name = data.params["data_file"][rg[0] : rg[-1]] + ".png"
+            save_name = os.path.join(corr_params["output"]["save_location"], save_name)
             plt.savefig(save_name)
 
+    r.corr_params = corr_params
+
+    if corr_params["output"]["save_correction_result"]:
+        rg = corr_params["output"]["data_file_snip"]
+        file_name = (
+            corr_params["output"]["save_name"]
+            + data.params["data_file"][rg[0] : rg[-1]]
+        )
+
+        r.export(
+            os.path.join(
+                corr_params["output"]["save_location"],
+                file_name,
+            ),
+            print_info=True,
+            include_time_inside=True,
+        )
         return r
 
 
-def run_analysis(params):
-    Figures = params["show_figures"]
-    pulses_per_clock = params["modulation_params"]["pulses_per_clock"]
+def prepare_data(data_params, path_dic=None):
+
+    if path_dic is None:
+        full_path = os.path.join(data_params["data_path"], data_params["data_file"])
+    else:
+        full_path = os.path.join(path_dic["path"], path_dic["file"])
+
+    data = DataObj()
+
+    Figures = data_params["view"]["show_figures"]
+    pulses_per_clock = data_params["modulation_params"]["pulses_per_clock"]
     # get data set up
-    snspd_channel = params["snspd_channel"]
-    clock_channel = params["clock_channel"]
+    snspd_channel = data_params["snspd_channel"]
+    clock_channel = data_params["clock_channel"]
     snspd_tags, clock_tags, channels, timetags = load_snspd_and_clock_tags(
-        params["data_file"],
-        params["data_path"],
-        params["snspd_channel"],
-        params["clock_channel"],
-        params["data_limit"],
+        full_path,
+        data_params["snspd_channel"],
+        data_params["clock_channel"],
+        data_params["data_limit"],
     )
-    stats = data_statistics(
-        params["modulation_params"], snspd_tags, clock_tags, debug=False
+    data.stats = data_statistics(
+        data_params["modulation_params"], snspd_tags, clock_tags, debug=False
     )
 
-    delay = params["delay"]
     # optional delay analysis
-    if params[
+    if data_params[
         "delay_scan"
     ]:  # to be done with a low detection rate file (high attentuation)
         delay = delay_analysis(
@@ -610,106 +632,122 @@ def run_analysis(params):
             timetags,
             clock_channel,
             snspd_channel,
-            stats,
-            delay,
-            params["phase_locked_loop"]["deriv"],
-            params["phase_locked_loop"]["prop"],
+            data.stats,
+            data_params["delay"],
+            data_params["phase_locked_loop"]["deriv"],
+            data_params["phase_locked_loop"]["prop"],
         )
-    clocks, recovered_clocks, data_tags, nearest_pulse_times, cycles = clockLock(
+    (
+        data.clocks,
+        data.recovered_clocks,
+        data.data_tags,
+        data.nearest_pulse_times,
+        cycles,
+    ) = clockLock(
         channels,
         timetags,
-        params["clock_channel"],
-        params["snspd_channel"],
-        params["modulation_params"]["pulses_per_clock"],
-        delay,
-        window=params["phase_locked_loop"]["window"],
-        deriv=params["phase_locked_loop"]["deriv"],
-        prop=params["phase_locked_loop"]["prop"],
-        guardPeriod=params["phase_locked_loop"]["guard_period"],
+        data_params["clock_channel"],
+        data_params["snspd_channel"],
+        data_params["modulation_params"]["pulses_per_clock"],
+        data_params["delay"],
+        window=data_params["phase_locked_loop"]["window"],
+        deriv=data_params["phase_locked_loop"]["deriv"],
+        prop=data_params["phase_locked_loop"]["prop"],
+        guardPeriod=data_params["phase_locked_loop"]["guard_period"],
     )
     if Figures:
-        checkLocking(clocks, recovered_clocks)
+        checkLocking(data.clocks, data.recovered_clocks)
 
     make_histogram(
-        data_tags[: params["histogram_max_tags"]],
-        nearest_pulse_times[: params["histogram_max_tags"]],
-        delay,
-        stats,
+        data.data_tags[: data_params["view"]["histogram_max_tags"]],
+        data.nearest_pulse_times[: data_params["view"]["histogram_max_tags"]],
+        data_params["delay"],
+        data.stats,
         Figures,
     )
+    data.params = data_params
+    if path_dic is not None:
+        # update data.params to point to the passed file
+        data.params["data_path"] = path_dic["path"]
+        data.params["data_file"] = path_dic["file"]
+    return data
 
-    if params["do_calibration"]:
-        cal_results_obj = DataObj()  # for storing results of calibration
-        cal_results_obj.stats = stats
-        cal_results_obj.params = params
 
-        diffs = calculate_diffs(
-            data_tags, nearest_pulse_times, delay
-        )  # returns diffs in nanoseconds
+def do_calibration(cal_params, data):
+    cal_results_obj = DataObj()  # for storing results of calibration
+    cal_results_obj.stats = data.stats
+    cal_results_obj.cal_params = cal_params
 
-        mask_manager = MaskGenerator(
-            diffs,
-            analysis_params["analysis_range"],
-            stats["inter_pulse_time"],
-            figures=params["show_figures"],
-            main_hist_downsample=1,
-        )  # used to separate out the data into discrete distributions for each t'
+    diffs = calculate_diffs(
+        data.data_tags, data.nearest_pulse_times, data.params["delay"]
+    )  # returns diffs in nanoseconds
 
-        if params["mask_method"] == "from_period":
-            cal_results_obj = mask_manager.apply_mask_from_period(
-                params["mask_from_period"], cal_results_obj
-            )
+    mask_manager = MaskGenerator(
+        diffs,
+        cal_params["analysis_range"],
+        data.stats["inter_pulse_time"],
+        figures=cal_params["view"]["show_figures"],
+        main_hist_downsample=1,
+    )  # used to separate out the data into discrete distributions for each t'
 
-        elif params["mask_method"] == "from_peaks":
-            cal_results_obj = mask_manager.apply_mask_from_peaks(
-                params["mask_from_peaks"], cal_results_obj
-            )
-        else:
-            print("Unknown decoding method")
-            return 1
-
-        if params["output"]["save_analysis_result"]:
-            cal_results_obj.export(
-                params["output"]["save_name"], include_time=True, print_info=True
-            )
-
-    # use data_tags and nearest_pulse_times for making the histograms.
-    if params["correction"]["do_correction"]:
-        if params["correction"]["load_pre-generated_calibration"]:
-            calibration_obj = DataObj(
-                os.path.join(
-                    params["correction"]["pre-generated_calibration"]["path"],
-                    params["correction"]["pre-generated_calibration"]["file"],
-                )
-            )
-        else:
-            # else would I do this?
-            # you could initialize the object no matter what, and give it some label inside if it is used
-            try:
-                cal_results_obj  # check if it exists
-            except UnboundLocalError:
-                print(
-                    "Error: if calibration is not loaded externally, it must be enabled. \n"
-                    "Set do_calibration to True, or set load_pre-generated_calibration to True"
-                )
-                return 1
-
-        # should I loop over correction files here? No, you need to load multiple files...
-        corr_results_obj = DataObj()
-        corr_results_obj = do_correction(
-            calibration_obj,
-            corr_results_obj,
-            data_tags,
-            nearest_pulse_times,
-            stats,
-            params,
+    if cal_params["mask_method"] == "from_period":
+        cal_results_obj = mask_manager.apply_mask_from_period(
+            cal_params["mask_from_period"], cal_results_obj
         )
 
-        if params["correction"]["output"]["save_correction_result"]:
+    elif cal_params["mask_method"] == "from_peaks":
+        cal_results_obj = mask_manager.apply_mask_from_peaks(
+            cal_params["mask_from_peaks"], cal_results_obj
+        )
+    else:
+        print("Unknown decoding method")
+        return 1
 
-            corr_results_obj.export()
+    cal_results_obj.data_params = data.params
 
-        # rep rate of the calibration set may be different than that of the corrected set.
+    if cal_params["output"]["save_analysis_result"]:
+        cal_results_obj.export(
+            cal_params["output"]["save_name"], include_time=True, print_info=True
+        )
+
+    return cal_results_obj
+
+
+# def do_correction():
+#     if params["correction"]["load_pre-generated_calibration"]:
+#         calibration_obj = DataObj(
+#             os.path.join(
+#                 params["correction"]["pre-generated_calibration"]["path"],
+#                 params["correction"]["pre-generated_calibration"]["file"],
+#             )
+#         )
+#     else:
+#         # else would I do this?
+#         # you could initialize the object no matter what, and give it some label inside if it is used
+#         try:
+#             cal_results_obj  # check if it exists
+#         except UnboundLocalError:
+#             print(
+#                 "Error: if calibration is not loaded externally, it must be enabled. \n"
+#                 "Set do_calibration to True, or set load_pre-generated_calibration to True"
+#             )
+#             return 1
+#
+#     # should I loop over correction files here? No, you need to load multiple files...
+#     corr_results_obj = DataObj()
+#     corr_results_obj = do_correction(
+#         calibration_obj,
+#         corr_results_obj,
+#         data_tags,
+#         nearest_pulse_times,
+#         stats,
+#         params,
+#     )
+#
+#     if params["correction"]["output"]["save_correction_result"]:
+#         corr_results_obj.export()
+#
+#     # rep rate of the calibration set may be different than that of the corrected set.
 
 
 def sleeper(t, iter, tbla=0):
@@ -721,35 +759,74 @@ def sleeper(t, iter, tbla=0):
     return t
 
 
-class RunAnalysisCopier(object):
-    def __init__(self, path, modu_params, DERIV, PROP, delayScan, delay, Figures):
-        self.Path = path
-        self.Deriv = DERIV
-        self.Prop = PROP
-        self.DelayScan = delayScan
-        self.Delay = delay
-        self.Figures = Figures
-        self.modu_params = modu_params
+# class RunAnalysisCopier(object):
+#     def __init__(self, path, modu_params, DERIV, PROP, delayScan, delay, Figures):
+#         self.Path = path
+#         self.Deriv = DERIV
+#         self.Prop = PROP
+#         self.DelayScan = delayScan
+#         self.Delay = delay
+#         self.Figures = Figures
+#         self.modu_params = modu_params
+#
+#     def __call__(self, file_iterator):
+#
+#         return run_analysis(
+#             self.Path,
+#             file_iterator,
+#             self.modu_params,
+#             DERIV=self.Deriv,
+#             PROP=self.Prop,
+#             delayScan=self.DelayScan,
+#             delay=self.Delay,
+#             Figures=self.Figures,
+#         )
 
-    def __call__(self, file_iterator):
 
-        return run_analysis(
-            self.Path,
-            file_iterator,
-            self.modu_params,
-            DERIV=self.Deriv,
-            PROP=self.Prop,
-            delayScan=self.DelayScan,
-            delay=self.Delay,
-            Figures=self.Figures,
+def get_file_list(path):
+    ls = os.listdir(path)
+    files = []
+    for item in ls:
+        if os.path.isfile(os.path.join(path, item)):
+            files.append(item)
+    return files
+
+
+class MultiprocessLoaderCorrector:
+    def __init__(self, _params, _calibration_obj):
+        # self.params = _params
+        self.data_params = _params["data"]
+        self.correction_params = _params["correction"]
+        self.calibration_object = _calibration_obj
+        self.path = _params["correction"]["multiple_files_path"]
+
+    def __call__(self, file):
+        return caller(
+            self.data_params,
+            self.path,
+            file,
+            self.correction_params,
+            self.calibration_object,
         )
+        # print("you are being called")
+        # data = prepare_data(self._params["data"], full_path=data_path)
+        # # need some way of signaling it should use explicit file
+        # print("data exists")
+        # return do_correction(self._params["correction"],
+        # self.calibration_object, data)
+
+
+def caller(data_params, path, file, correction_params, calibration_object):
+    path_dic = {"path": path, "file": file}
+    data = prepare_data(data_params, path_dic=path_dic)
+    return do_correction(correction_params, calibration_object, data)
 
 
 if __name__ == "__main__":
 
     with open("analysis_params.yaml", "r") as f:
-        analysis_params = yaml.safe_load(f)["params"]
-
+        params = yaml.safe_load(f)["params"]
+    #
     # if analysis_params["correction"]["analyze_set"]:
     #     LS = []
     #     # ** this is very specific to the dataset collected on April 5
@@ -778,5 +855,64 @@ if __name__ == "__main__":
     #         "jitterate_swabianHighRes_537.5MHz_" + today_now + ".json", "w"
     #     ) as outfile:
     #         json.dump(LS, outfile, indent=4)
+    #
+    # run_analysis(analysis_params)  # do the looping over data files in here.
 
-    run_analysis(analysis_params)  # do the looping over data files in here.
+    # just calibrate and save
+    if params["do_calibration"] and not params["do_correction"]:
+        data = prepare_data(params["data"])
+        calibration_obj = do_calibration(params["calibration"], data)
+
+    if params["do_calibration"] and params["do_correction"]:
+        print("calibrating and correcting data_file: ", params["data_file"])
+        if params["correction"]["load_pre-generated_calibration"]:
+            print(
+                "WARNING: the pre-generated calibration will not be used unless "
+                "do_calibration is turned off"
+            )
+        if params["correction"]["correct_multiple_files"]:
+            print(
+                "WARNING: multi-file correction requires "
+                "'load_pre-generated_calibration = True' and \n"
+                "'do_calibration = False'"
+            )
+
+        data = prepare_data(params["data"])
+        calibration_obj = do_calibration(params["calibration"], data)
+        results_obj = do_correction(params["correction"], calibration_obj, data)
+
+    if not params["do_calibration"] and params["do_correction"]:
+        if params["correction"]["load_pre-generated_calibration"]:
+            calibration_obj = DataObj(
+                os.path.join(
+                    params["correction"]["pre-generated_calibration"]["path"],
+                    params["correction"]["pre-generated_calibration"]["file"],
+                )
+            )
+            if params["correction"]["correct_multiple_files"]:
+                # override show_figures
+
+                params["view"]["show_figures"] = False
+                params["data"]["view"]["show_figures"] = False
+                params["correction"]["view"]["show_figures"] = True
+
+                file_list = get_file_list(params["correction"]["multiple_files_path"])
+
+                # for some reason the multiprocessing does not work in pycharm
+                # python console!
+                with concurrent.futures.ProcessPoolExecutor(max_workers=8) as executor:
+                    ls = executor.map(
+                        MultiprocessLoaderCorrector(params, calibration_obj), file_list
+                    )
+
+            else:
+                # load and do single file correction
+                data = prepare_data(params["data"])
+                results_obj = do_correction(params["correction"], calibration_obj, data)
+
+        else:
+            print(
+                "Error: Cannot do a correction without either calibrating loaded data\n"
+                "calibration file. Set 'do_calibration' to True, or set "
+                "'load_pre-generated_calibration' to True."
+            )
