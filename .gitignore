@@ -6,6 +6,7 @@
 .idea/
 __pycache__/
 .ipynb_checkpoints/
+sim/
 
 analysis_500mhz.py
 correction_1ghz.py

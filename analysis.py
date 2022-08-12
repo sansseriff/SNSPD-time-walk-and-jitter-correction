@@ -352,6 +352,10 @@ def do_correction(corr_params, calibration_obj, data):
         delta_ts, calibration_obj.t_prime, calibration_obj.offsets
     )  # in picoseconds. Remove the 1st couple data
 
+    uncorrupted_tags = data_tags[delta_ts > 200]  # nanoseconds
+    uncorrupted_diffs = uncorrupted_tags - nearest_pulse_times[delta_ts > 200]
+    # print("length of uncorrupted tags: ", len(uncorrupted_tags))
+
     plt.figure()
     hist, bins = np.histogram(shifts, bins=500)
     plt.plot(bins[:-1], hist)
@@ -367,6 +371,7 @@ def do_correction(corr_params, calibration_obj, data):
     const_offset = uncorrected_diffs.min()
     uncorrected_diffs = uncorrected_diffs - const_offset - edge  # cancel offset
     corrected_diffs = corrected_diffs - const_offset - edge
+    uncorrupted_diffs = uncorrupted_diffs - const_offset - edge
 
     r.hist_bins = np.arange(-edge, edge, 1)
     r.hist_uncorrected, r.hist_bins = np.histogram(
@@ -375,34 +380,41 @@ def do_correction(corr_params, calibration_obj, data):
     r.hist_corrected, r.hist_bins = np.histogram(
         corrected_diffs, r.hist_bins, density=True
     )
+
+    r.hist_uncorrupted, r.hist_bins = np.histogram(
+        uncorrupted_diffs, r.hist_bins, density=True
+    )
+
     r.hist_bins = r.hist_bins[1:] - (r.hist_bins[1] - r.hist_bins[0]) / 2
 
     #############################
-    if corr_params["view"]["show_figures"]:
-        fig, ax = plt.subplots(1, 1, figsize=(4, 3), dpi=275)
-        ax.plot(
-            r.hist_bins,
-            r.hist_uncorrected,
-            "--",
-            color="black",
-            alpha=0.8,
-            label="uncorrected data",
-        )
-        ax.plot(
-            r.hist_bins,
-            r.hist_corrected,
-            color="black",
-            label="corrected data",
-        )
+    # if corr_params["view"]["show_figures"]:
+    fig, ax = plt.subplots(1, 1, figsize=(4, 3), dpi=275)
+    ax.plot(
+        r.hist_bins,
+        r.hist_uncorrected,
+        "--",
+        color="black",
+        alpha=0.8,
+        label="uncorrected data",
+    )
+    ax.plot(
+        r.hist_bins,
+        r.hist_corrected,
+        color="black",
+        label="corrected data",
+    )
 
-        ax.grid(which="both")
-        plt.legend()
-        plt.title(
-            f"count rate: {parse_count_rate(data.stats['count_rate'])}, "
-            f"data_file: {data.params['data_file']}"
-        )
-        ax.set_xlabel("time (ps)")
-        ax.set_ylabel("counts (ps)")
+    ax.grid(which="both")
+    plt.legend()
+    plt.title(
+        f"count rate: {parse_count_rate(data.stats['count_rate'])}, "
+        f"data_file: {data.params['data_file']}"
+    )
+    ax.set_xlabel("time (ps)")
+    ax.set_ylabel("counts (ps)")
+    if not corr_params["view"]["show_figures"]:
+        plt.close(fig)
 
     # resolution or smoothing of CubicSpline is determined by the resolution
     # of these _interp arrays
@@ -419,6 +431,17 @@ def do_correction(corr_params, calibration_obj, data):
     r.hist_uncorrected_interp, r.hist_bins_interp = np.histogram(
         uncorrected_diffs, r.hist_bins_interp, density=True
     )
+
+    r.corrected_mean = np.mean(corrected_diffs)
+    r.corrected_median = np.median(corrected_diffs)
+
+    r.uncorrected_mean = np.mean(uncorrected_diffs)
+    r.uncorrected_media = np.median(uncorrected_diffs)
+
+    r.uncorrupted_median = np.median(uncorrupted_diffs)
+    r.uncorrupted_mean = np.mean(uncorrupted_diffs)
+    r.uncorrupted_number = len(uncorrupted_diffs)
+    r.uncorrupted_std = np.std(uncorrupted_diffs)
 
     r.hist_bins_interp = (
         r.hist_bins_interp[1:] - (r.hist_bins_interp[1] - r.hist_bins_interp[0]) / 2
@@ -498,88 +521,103 @@ def do_correction(corr_params, calibration_obj, data):
     print("FWTM uncorrected: ", r.fwtm_uncorrected.roots(-1, 0))
     print("FW100M uncorrected: ", r.fwhum_uncorrected.roots(-1, 0))
 
-    if corr_params["view"]["show_figures"]:
-        fig, ax = plt.subplots(1, 1, figsize=(7, 3.5))
+    # if corr_params["view"]["show_figures"]:
+    fig, ax = plt.subplots(1, 1, figsize=(7, 3.5))
 
-        ax.plot(
-            r.hist_bins,
-            r.hist_uncorrected,
-            label="uncorrected raw data",
-            alpha=0.3,
-            color="orange",
+    ax.plot(
+        r.hist_bins,
+        r.hist_uncorrected,
+        label="uncorrected raw data",
+        alpha=0.3,
+        color="orange",
+    )
+    ax.plot(
+        r.hist_bins,
+        r.hist_corrected,
+        label="corrected raw data",
+        alpha=0.3,
+    )
+    ax.plot(
+        r.hist_bins,
+        spline_corrected(r.hist_bins),
+        "k",
+        alpha=1,
+        label="cubic spline corrected",
+    )
+    ax.plot(
+        r.hist_bins,
+        spline_uncorrected(r.hist_bins),
+        "k",
+        alpha=0.3,
+        label="cubic spline uncorrected",
+        ls="--",
+    )
+    ax.plot(
+        r.hist_bins,
+        r.hist_uncorrupted,
+        color="green",
+        label="uncorrupted tags",
+        alpha=0.2,
+    )
+
+    ax.axvline(x=r.uncorrupted_mean, color="green")
+    ax.axvline(x=r.uncorrupted_median, color="green", ls="--")
+
+    title = f"count rate: {number_manager(data.stats['count_rate'])}"
+    ax.set_title(title)
+
+    r.hist_spline_corrected = spline_corrected(r.hist_bins)
+    r.hist_spline_uncorrected = spline_uncorrected(r.hist_bins)
+
+    line_objs = [
+        r.fwhm_uncorrected,
+        r.fwtm_uncorrected,
+        r.fwhum_uncorrected,
+        r.fwhm_corrected,
+        r.fwtm_corrected,
+        r.fwhum_corrected,
+    ]
+
+    for line_obj in line_objs:
+        label = f"{line_obj.label} {round(line_obj.roots(-1, 0), 1)} ps"
+        ax.hlines(
+            line_obj.level,
+            line_obj.root_list[-1],
+            line_obj.root_list[0],
+            label=label,
+            color=line_obj.color,
+            ls=line_obj.line_style,
         )
-        ax.plot(
-            r.hist_bins,
-            r.hist_corrected,
-            label="corrected raw data",
-            alpha=0.3,
-        )
-        ax.plot(
-            r.hist_bins,
-            spline_corrected(r.hist_bins),
-            "k",
-            alpha=1,
-            label="cubic spline corrected",
-        )
-        ax.plot(
-            r.hist_bins,
-            spline_uncorrected(r.hist_bins),
-            "k",
-            alpha=0.3,
-            label="cubic spline uncorrected",
-            ls="--",
-        )
-        title = f"count rate: {number_manager(data.stats['count_rate'])}"
-        ax.set_title(title)
+    ax.grid()
+    ax.set_xlim(-edge, edge)
+    ax.set_xlabel("time (ps)")
+    ax.set_ylabel("normalized counts")
+    plt.legend(fancybox=True, frameon=False, loc="upper left")
+    ax.set_yscale("log")
+    ax.set_ylim(1e-6, 0.1)
 
-        r.hist_spline_corrected = spline_corrected(r.hist_bins)
-        r.hist_spline_uncorrected = spline_uncorrected(r.hist_bins)
+    ax_lin = inset_axes(ax, width="30%", height=1, loc=1)
+    ax_lin.plot(r.hist_bins, spline_corrected(r.hist_bins), "k", alpha=1)
+    ax_lin.plot(
+        r.hist_bins,
+        spline_uncorrected(r.hist_bins),
+        "k",
+        alpha=0.3,
+        ls="--",
+    )
+    ax_lin.set_xlim(-edge, edge)
+    if corr_params["output"]["save_fig"]:
+        rg = corr_params["output"]["data_file_snip"]
+        save_name = data.params["data_file"][rg[0] : rg[-1]] + ".png"
+        save_name = os.path.join(corr_params["output"]["save_location"], save_name)
+        plt.savefig(save_name)
 
-        line_objs = [
-            r.fwhm_uncorrected,
-            r.fwtm_uncorrected,
-            r.fwhum_uncorrected,
-            r.fwhm_corrected,
-            r.fwtm_corrected,
-            r.fwhum_corrected,
-        ]
-
-        for line_obj in line_objs:
-            label = f"{line_obj.label} {round(line_obj.roots(-1, 0), 1)} ps"
-            ax.hlines(
-                line_obj.level,
-                line_obj.root_list[-1],
-                line_obj.root_list[0],
-                label=label,
-                color=line_obj.color,
-                ls=line_obj.line_style,
-            )
-        ax.grid()
-        ax.set_xlim(-edge, edge)
-        ax.set_xlabel("time (ps)")
-        ax.set_ylabel("normalized counts")
-        plt.legend(fancybox=True, frameon=False, loc="upper left")
-        ax.set_yscale("log")
-        ax.set_ylim(1e-6, 0.1)
-
-        ax_lin = inset_axes(ax, width="30%", height=1, loc=1)
-        ax_lin.plot(r.hist_bins, spline_corrected(r.hist_bins), "k", alpha=1)
-        ax_lin.plot(
-            r.hist_bins,
-            spline_uncorrected(r.hist_bins),
-            "k",
-            alpha=0.3,
-            ls="--",
-        )
-        ax_lin.set_xlim(-edge, edge)
-
-        if corr_params["output"]["save_fig"]:
-            rg = corr_params["output"]["data_file_snip"]
-            save_name = data.params["data_file"][rg[0] : rg[-1]] + ".png"
-            save_name = os.path.join(corr_params["output"]["save_location"], save_name)
-            plt.savefig(save_name)
+    if not corr_params["view"]["show_figures"]:
+        plt.close(fig)
 
     r.corr_params = corr_params
+    r.data_stats = data.stats
+    r.data_params = data.params
 
     if corr_params["output"]["save_correction_result"]:
         rg = corr_params["output"]["data_file_snip"]
@@ -826,37 +864,6 @@ if __name__ == "__main__":
 
     with open("analysis_params.yaml", "r") as f:
         params = yaml.safe_load(f)["params"]
-    #
-    # if analysis_params["correction"]["analyze_set"]:
-    #     LS = []
-    #     # ** this is very specific to the dataset collected on April 5
-    #     dBlist = [i * 2 + 26 for i in range(21)]
-    #     path = "..//data//537.5MHz_0.1s//"
-    #     file_list = [
-    #         "jitterate_537.5MHz_-.025V_" + str(dB) + ".0.1.ttbin" for dB in dBlist
-    #     ]
-    #     params_file = "..//modu//537.5MHz//0_21.08.27.13.24_params.yml"
-    #     with open(params_file, "r") as f:
-    #         modu_params = yaml.full_load(f)
-    #     sleep_list = [(1.05**i) for i in range(10)]
-    #     with concurrent.futures.ProcessPoolExecutor(max_workers=4) as executor:
-    #         dictList = executor.map(
-    #             R(path, modu_params, 200000, 1e-14, False, -230, False),
-    #             file_list,
-    #         )
-    #         # takes 10 - 20 minutes on 16 threads
-    #     LS = []
-    #     for dB, item in zip(dBlist, dictList):
-    #         print(item)
-    #         item["dB"] = dB
-    #         LS.append(item)
-    #     today_now = datetime.now().strftime("%y.%m.%d.%H.%M")
-    #     with open(
-    #         "jitterate_swabianHighRes_537.5MHz_" + today_now + ".json", "w"
-    #     ) as outfile:
-    #         json.dump(LS, outfile, indent=4)
-    #
-    # run_analysis(analysis_params)  # do the looping over data files in here.
 
     # just calibrate and save
     if params["do_calibration"] and not params["do_correction"]:
@@ -900,7 +907,7 @@ if __name__ == "__main__":
 
                 # for some reason the multiprocessing does not work in pycharm
                 # python console!
-                with concurrent.futures.ProcessPoolExecutor(max_workers=8) as executor:
+                with concurrent.futures.ProcessPoolExecutor(max_workers=6) as executor:
                     ls = executor.map(
                         MultiprocessLoaderCorrector(params, calibration_obj), file_list
                     )
