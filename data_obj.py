@@ -52,6 +52,7 @@ class DataObj:
         dic_2 = dic.copy()
         for key in dic.keys():
             # handle numpy arrays
+            # does not working with multi-dimensional numpy arrays yet. need recursive check function
             if type(dic[key]) is list:
                 if (type(dic[key][0]) is float) or (type(dic[key][0]) is int):
                     dic_2[key] = np.array(dic[key])

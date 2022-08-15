@@ -28,9 +28,11 @@ import glob
 from matplotlib import cm
 from scipy.signal import find_peaks
 from os.path import exists
-from scipy.interpolate import CubicSpline
+from scipy.interpolate import CubicSpline, interp2d
 from mask_generators import MaskGenerator
 from data_obj import DataObj
+
+from tqdm import tqdm
 
 
 Colors, palette = phd.viz.phd_style(text=1)
@@ -279,6 +281,18 @@ def calculate_diffs(data_tags, nearest_pulse_times, delay):
     return diffs
 
 
+def calculate_2d_diffs(data_tags, nearest_pulse_times, delay):
+    delays = data_tags[2:-2] + delay - nearest_pulse_times[2:-2]
+
+    # this makes more sense to me than using np.diff
+    prime_1 = nearest_pulse_times[2:-2] - np.roll(nearest_pulse_times, 1)[2:-2]
+    prime_2 = (
+        np.roll(nearest_pulse_times, 1)[2:-2] - np.roll(nearest_pulse_times, 2)[2:-2]
+    )
+
+    return delays / 1000, prime_1 / 1000, prime_2 / 1000
+
+
 # def get_full_widths(x, y, level, analysis_range):
 #     """
 #     For finding FWHM, FW(1/10)M, etc. Returns dataObj with roots and level
@@ -336,6 +350,60 @@ def number_manager(number):
 
 
 def do_correction(corr_params, calibration_obj, data):
+    if corr_params["type"] == "1d":
+        return do_1d_correction(corr_params, calibration_obj, data)
+    if corr_params["type"] == "2d":
+        return do_2d_correction(corr_params, calibration_obj, data)
+
+
+def do_2d_correction(corr_params, calibration_obj, data):
+    r = DataObj()  # results object
+    delays, prime_1, prime_2 = calculate_2d_diffs(
+        data.data_tags, data.nearest_pulse_times, data.params["delay"]
+    )  # returns diffs in nanoseconds
+
+    # prime_steps = cal_params["prime_steps"]
+    # prime_1 = prime_1 / data.stats["pulse_rate"]
+    # prime_2 = prime_2 / data.stats["pulse_rate"]
+    # prime_1 = prime_1.astype("int")
+    # prime_2 = prime_2.astype("int")
+
+    diff_1 = np.roll(np.diff(data.data_tags), 1)
+    diff_1 = diff_1[2:-2]
+    diff_2 = np.roll(diff_1, 1)
+    diff_2 = diff_2[2:-2]
+
+    uncorrected_diffs = data.data_tags - data.nearest_pulse_times
+    uncorrected_diffs = uncorrected_diffs[2:-2]
+
+    medians = calibration_obj.medians
+
+    # make sure edges has the correct scaling from the calibration file
+    edges = np.arange(len(medians)) * calibration_obj.stats["pulse_rate"]
+
+    interpolator = interp2d(edges, edges, medians, "linear")
+
+    shifts = interpolator(diff_1, diff_2) * 1000  # now in picoseconds
+
+    corrected = data.data_tags[2:-2] - shifts
+    corrected_diffs = corrected - data.nearest_pulse_times[2:-2]
+
+    edge = int(data.stats["inter_pulse_time"] * 1000 / 2)
+    r.hist_bins = np.arange(-edge, edge, 1)
+    r.hist_uncorrected, r.hist_bins = np.histogram(
+        uncorrected_diffs, r.hist_bins, density=True
+    )
+    r.hist_corrected, r.hist_bins = np.histogram(
+        corrected_diffs, r.hist_bins, density=True
+    )
+
+    r.hist_bins = r.hist_bins[1:] - (r.hist_bins[1] - r.hist_bins[0]) / 2
+    plt.figure()
+    plt.plot(r.hist_bins, r.hist_uncorrected)
+    plt.plot(r.hist_bins, r.hist_corrected, ls="--")
+
+
+def do_1d_correction(corr_params, calibration_obj, data):
     r = DataObj()  # results object
     delta_ts = data.data_tags - np.roll(data.data_tags, 1)
     delta_ts = delta_ts[1:-1] / 1000  # now in nanoseconds
@@ -711,7 +779,95 @@ def prepare_data(data_params, path_dic=None):
     return data
 
 
+# @njit
+def do_2d_scan(prime_1_masks, prime_2_masks, delays, prime_steps):
+
+    medians = np.zeros((prime_steps, prime_steps))
+    means = np.zeros((prime_steps, prime_steps))
+    std = np.zeros((prime_steps, prime_steps))
+    counts = np.zeros((prime_steps, prime_steps))
+    for i in tqdm(range(len(prime_1_masks))):
+        # print(i / prime_steps)
+        for j in range(len(prime_2_masks)):
+            # inside is prime_2
+            sub_delays = delays[prime_1_masks[i] & prime_2_masks[j]]
+            counts[i, j] = len(sub_delays)
+
+            if len(sub_delays > 10):
+                medians[i, j] = np.median(sub_delays)
+                means[i, j] = np.mean(sub_delays)
+                std[i, j] = np.std(sub_delays)
+
+    valid = counts > 10  # boolean mask
+    adjustment = np.mean(medians[-30:, -30:])
+    medians[valid] = medians[valid] - adjustment
+    means[valid] = means[valid] - adjustment
+
+    return medians, means, std, counts
+
+
 def do_calibration(cal_params, data):
+    if cal_params["type"] == "1d":
+        return do_1d_calibration(cal_params, data)
+    if cal_params["type"] == "2d":
+        return do_2d_calibration(cal_params, data)
+    else:
+        print("calibration type unknown: [use '1d' or '2d']")
+        quit()
+
+
+def do_2d_calibration(cal_params, data):
+    cal_results_obj = DataObj()  # for storing results of calibration
+    cal_results_obj.stats = data.stats
+    cal_results_obj.data_params = data.params
+    cal_results_obj.cal_params = cal_params
+
+    delays, prime_1, prime_2 = calculate_2d_diffs(
+        data.data_tags, data.nearest_pulse_times, data.params["delay"]
+    )  # returns diffs in nanoseconds
+
+    prime_steps = cal_params["prime_steps"]
+    prime_1 = prime_1 / data.stats["pulse_rate"]
+    prime_2 = prime_2 / data.stats["pulse_rate"]
+    prime_1 = prime_1.astype("int")
+    prime_2 = prime_2.astype("int")
+
+    prime_1_masks = []
+    prime_2_masks = []
+
+    for i in tqdm(range(prime_steps)):
+        prime_1_masks.append(prime_1 == i)
+        prime_2_masks.append(prime_2 == i)
+
+    print("starting 2d analysis")
+    medians, means, std, counts = do_2d_scan(
+        prime_1_masks, prime_2_masks, delays, prime_steps
+    )
+
+    x = np.arange(0, prime_steps)
+    y = np.arange(0, prime_steps)
+    x, y = np.meshgrid(x, y)
+    fig, ax = plt.subplots(subplot_kw={"projection": "3d"})
+    ax.set_ylabel("prime 2")
+    ax.set_xlabel("prime_1")
+    ax.plot_surface(x, y, medians)
+
+    cal_results_obj.medians = medians
+    cal_results_obj.means = means
+    cal_results_obj.std = std
+    cal_results_obj.counts = counts
+
+    if cal_params["output"]["save_analysis_result"]:
+        cal_results_obj.export(
+            cal_params["output"]["save_name"] + "2d_",
+            include_time=True,
+            print_info=True,
+        )
+
+    return cal_results_obj
+
+
+def do_1d_calibration(cal_params, data):
     cal_results_obj = DataObj()  # for storing results of calibration
     cal_results_obj.stats = data.stats
     cal_results_obj.cal_params = cal_params
@@ -868,6 +1024,7 @@ if __name__ == "__main__":
     # just calibrate and save
     if params["do_calibration"] and not params["do_correction"]:
         data = prepare_data(params["data"])
+
         calibration_obj = do_calibration(params["calibration"], data)
 
     if params["do_calibration"] and params["do_correction"]:

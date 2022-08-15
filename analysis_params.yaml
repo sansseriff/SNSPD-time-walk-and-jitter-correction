@@ -7,11 +7,11 @@ params:
     view:
       show_figures: True
       histogram_max_tags: 500000
-    data_path: "C://Users//Andrew//Documents//peacoq_1_ghz//Wire_16//79mV_14.7uA/"
-    data_file: "W16_79mV_3.0s_60.0.1.ttbin"
+    data_path: "C://Users//Andrew//Documents//peacoq_1_ghz//Wire_1//41mV"
+    data_file: "W1_41mV_3.0s_47.0.1.ttbin"
     snspd_channel: -5
     clock_channel: 9
-    data_limit: 3.0e+7 #number of raw time tags to decode. Without the '+', yaml will parse this incorrectly as a string.
+    data_limit: 1.0e+8 #number of raw time tags to decode. Without the '+', yaml will parse this incorrectly as a string.
     delay_scan: False #should the program search for initial estimate of the timing offset bewteen the clock and snspd tags
     delay: -254 #restuls of the delay scan can be pasted here
     modulation_params:
@@ -27,11 +27,14 @@ params:
 
 
 ### Calibration
-  do_calibration: False
+  do_calibration: True
   calibration:
+    type: '2d' # options are '1d' or '2d'
     view:
       show_figures: True
     analysis_range: 200000 #picoseconds
+
+    ####### 1d
     mask_method: "from_period" # options are "from_period" or "from_peaks"
     mask_from_period:
       adjustment_prop: 0.0
@@ -43,30 +46,34 @@ params:
     mask_from_peaks:
       down_sample: 8
 
+    ####### 2d
+    prime_steps: 150
+
     output: # should go in calibration
       save_analysis_result: True
-      save_name: "./peacoq_results//Wire_16//79mV_14.7uA//calibration_results_"
+      save_name: "./peacoq_results//Wire_1//41mV//calibration_results_"
 
 
   ### Correction
   do_correction: True
   correction:
+    type: '2d' # options are '1d' or '2d'
     view:
       show_figures: True
     load_pre-generated_calibration: True
     pre-generated_calibration:
-      path: "./peacoq_results//Wire_16//79mV_14.7uA//"
+      path: "./peacoq_results//Wire_1//41mV"
       file: "calibration_results_10.08.2022_16.13.52.json"
 
     correct_multiple_files: True # if True, the data path at the top will be ignored
-    multiple_files_path: "C://Users//Andrew//Documents//peacoq_1_ghz//Wire_16//79mV_14.7uA//"
+    multiple_files_path: "C://Users//Andrew//Documents//peacoq_1_ghz//Wire_1//41mV"
 
     spline_interpolation_resolution: 200 # controls the smoothing of the CubicSpline used for measuring FWHM, etc.
 
     output:
       save_fig: True
       save_correction_result: True
-      save_location: "./peacoq_results//Wire_16//79mV_14.7uA//" # a single or multiple correction result files will go here.
+      save_location: "./peacoq_results//Wire_1//41mV" # a single or multiple correction result files will go here.
       save_name: "corrected_results_"
       data_file_snip: [0,-8] # defines snip of data file name that's included in results file
 
