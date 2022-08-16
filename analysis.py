@@ -28,7 +28,7 @@ import glob
 from matplotlib import cm
 from scipy.signal import find_peaks
 from os.path import exists
-from scipy.interpolate import CubicSpline, interp2d
+from scipy.interpolate import CubicSpline, RegularGridInterpolator
 from mask_generators import MaskGenerator
 from data_obj import DataObj
 
@@ -358,88 +358,42 @@ def do_correction(corr_params, calibration_obj, data):
 
 def do_2d_correction(corr_params, calibration_obj, data):
     r = DataObj()  # results object
-    delays, prime_1, prime_2 = calculate_2d_diffs(
-        data.data_tags, data.nearest_pulse_times, data.params["delay"]
-    )  # returns diffs in nanoseconds
-
-    # prime_steps = cal_params["prime_steps"]
-    # prime_1 = prime_1 / data.stats["pulse_rate"]
-    # prime_2 = prime_2 / data.stats["pulse_rate"]
-    # prime_1 = prime_1.astype("int")
-    # prime_2 = prime_2.astype("int")
 
     diff_1 = np.roll(np.diff(data.data_tags), 1)
-    diff_1 = diff_1[2:-2]
     diff_2 = np.roll(diff_1, 1)
+
+    diff_1 = diff_1[2:-2]
     diff_2 = diff_2[2:-2]
 
     uncorrected_diffs = data.data_tags - data.nearest_pulse_times
-    uncorrected_diffs = uncorrected_diffs[2:-2]
+    uncorrected_diffs = uncorrected_diffs[2:-3]
 
     medians = calibration_obj.medians
 
     # make sure edges has the correct scaling from the calibration file
-    edges = np.arange(len(medians)) * calibration_obj.stats["pulse_rate"]
+    # put edges in units of picoseconds
+    edges = (np.arange(len(medians)) / calibration_obj.stats["pulse_rate"]) * 1000
 
-    interpolator = interp2d(edges, edges, medians, "linear")
-
-    shifts = interpolator(diff_1, diff_2) * 1000  # now in picoseconds
-
-    corrected = data.data_tags[2:-2] - shifts
-    corrected_diffs = corrected - data.nearest_pulse_times[2:-2]
-
-    edge = int(data.stats["inter_pulse_time"] * 1000 / 2)
-    r.hist_bins = np.arange(-edge, edge, 1)
-    r.hist_uncorrected, r.hist_bins = np.histogram(
-        uncorrected_diffs, r.hist_bins, density=True
-    )
-    r.hist_corrected, r.hist_bins = np.histogram(
-        corrected_diffs, r.hist_bins, density=True
+    # interpolator = interp2d(edges, edges, medians, "linear")
+    func = RegularGridInterpolator(
+        (edges, edges), medians, bounds_error=False, fill_value=0
     )
 
-    r.hist_bins = r.hist_bins[1:] - (r.hist_bins[1] - r.hist_bins[0]) / 2
-    plt.figure()
-    plt.plot(r.hist_bins, r.hist_uncorrected)
-    plt.plot(r.hist_bins, r.hist_corrected, ls="--")
+    print("len of diff_1 and diff_2:", len(diff_1), len(diff_2))
+    diff_12 = list(zip(diff_1, diff_2))
+    shifts = func(diff_12)
+    # shifts = interpolator(diff_1, diff_2)  # now in picoseconds
 
+    print("length of shifts: ", len(shifts))
+    shifts = shifts * 1000
 
-def do_1d_correction(corr_params, calibration_obj, data):
-    r = DataObj()  # results object
-    delta_ts = data.data_tags - np.roll(data.data_tags, 1)
-    delta_ts = delta_ts[1:-1] / 1000  # now in nanoseconds
-    data_tags = data.data_tags[1:-1]
-    nearest_pulse_times = data.nearest_pulse_times[1:-1]
-
-    plt.figure()
-    hist, bins = np.histogram(delta_ts, bins=500)
-    plt.plot(bins[:-1], hist)
-    plt.title("dist of deltaTs")
-
-    # GENERATE SHIFTS
-    shifts = 1000 * np.interp(
-        delta_ts, calibration_obj.t_prime, calibration_obj.offsets
-    )  # in picoseconds. Remove the 1st couple data
-
-    uncorrupted_tags = data_tags[delta_ts > 200]  # nanoseconds
-    uncorrupted_diffs = uncorrupted_tags - nearest_pulse_times[delta_ts > 200]
-    # print("length of uncorrupted tags: ", len(uncorrupted_tags))
-
-    plt.figure()
-    hist, bins = np.histogram(shifts, bins=500)
-    plt.plot(bins[:-1], hist)
-    plt.title("dist of shifts")
-    # points because they are not generally valid.
-
-    corrected_tags = data_tags - shifts
-
-    uncorrected_diffs = data_tags - nearest_pulse_times
-    corrected_diffs = corrected_tags - nearest_pulse_times
+    corrected = data.data_tags[2:-3] - shifts
+    corrected_diffs = corrected - data.nearest_pulse_times[2:-3]
 
     edge = int(data.stats["inter_pulse_time"] * 1000 / 2)
     const_offset = uncorrected_diffs.min()
     uncorrected_diffs = uncorrected_diffs - const_offset - edge  # cancel offset
     corrected_diffs = corrected_diffs - const_offset - edge
-    uncorrupted_diffs = uncorrupted_diffs - const_offset - edge
 
     r.hist_bins = np.arange(-edge, edge, 1)
     r.hist_uncorrected, r.hist_bins = np.histogram(
@@ -449,41 +403,25 @@ def do_1d_correction(corr_params, calibration_obj, data):
         corrected_diffs, r.hist_bins, density=True
     )
 
-    r.hist_uncorrupted, r.hist_bins = np.histogram(
-        uncorrupted_diffs, r.hist_bins, density=True
-    )
+    hist, bins = np.histogram(shifts, bins=1000)
+    plt.figure()
+    plt.plot(bins[1:], hist)
+    plt.title("shifts")
 
     r.hist_bins = r.hist_bins[1:] - (r.hist_bins[1] - r.hist_bins[0]) / 2
-
-    #############################
-    # if corr_params["view"]["show_figures"]:
-    fig, ax = plt.subplots(1, 1, figsize=(4, 3), dpi=275)
-    ax.plot(
-        r.hist_bins,
-        r.hist_uncorrected,
-        "--",
-        color="black",
-        alpha=0.8,
-        label="uncorrected data",
-    )
-    ax.plot(
-        r.hist_bins,
-        r.hist_corrected,
-        color="black",
-        label="corrected data",
-    )
-
-    ax.grid(which="both")
-    plt.legend()
+    plt.figure()
+    plt.plot(r.hist_bins, r.hist_uncorrected, label="uncorrected")
+    plt.plot(r.hist_bins, r.hist_corrected, ls="--", label="corrected")
     plt.title(
         f"count rate: {parse_count_rate(data.stats['count_rate'])}, "
         f"data_file: {data.params['data_file']}"
     )
-    ax.set_xlabel("time (ps)")
-    ax.set_ylabel("counts (ps)")
-    if not corr_params["view"]["show_figures"]:
-        plt.close(fig)
+    plt.legend()
 
+
+def plot_and_analyze_histogram(
+    r, corrected_diffs, uncorrected_diffs, uncorrupted_diffs, corr_params, edge
+):
     # resolution or smoothing of CubicSpline is determined by the resolution
     # of these _interp arrays
     r.hist_bins_interp = np.linspace(
@@ -683,6 +621,95 @@ def do_1d_correction(corr_params, calibration_obj, data):
     if not corr_params["view"]["show_figures"]:
         plt.close(fig)
 
+    return r
+
+
+def do_1d_correction(corr_params, calibration_obj, data):
+    r = DataObj()  # results object
+    delta_ts = data.data_tags - np.roll(data.data_tags, 1)
+    delta_ts = delta_ts[1:-1] / 1000  # now in nanoseconds
+    data_tags = data.data_tags[1:-1]
+    nearest_pulse_times = data.nearest_pulse_times[1:-1]
+
+    plt.figure()
+    hist, bins = np.histogram(delta_ts, bins=500)
+    plt.plot(bins[:-1], hist)
+    plt.title("dist of deltaTs")
+
+    # GENERATE SHIFTS
+    shifts = 1000 * np.interp(
+        delta_ts, calibration_obj.t_prime, calibration_obj.offsets
+    )  # in picoseconds. Remove the 1st couple data
+
+    uncorrupted_tags = data_tags[delta_ts > 200]  # nanoseconds
+    uncorrupted_diffs = uncorrupted_tags - nearest_pulse_times[delta_ts > 200]
+    # print("length of uncorrupted tags: ", len(uncorrupted_tags))
+
+    plt.figure()
+    hist, bins = np.histogram(shifts, bins=500)
+    plt.plot(bins[:-1], hist)
+    plt.title("dist of shifts")
+    # points because they are not generally valid.
+
+    corrected_tags = data_tags - shifts
+
+    uncorrected_diffs = data_tags - nearest_pulse_times
+    corrected_diffs = corrected_tags - nearest_pulse_times
+
+    edge = int(data.stats["inter_pulse_time"] * 1000 / 2)
+    const_offset = uncorrected_diffs.min()
+    uncorrected_diffs = uncorrected_diffs - const_offset - edge  # cancel offset
+    corrected_diffs = corrected_diffs - const_offset - edge
+    uncorrupted_diffs = uncorrupted_diffs - const_offset - edge
+
+    #############################
+    r.hist_bins = np.arange(-edge, edge, 1)
+    r.hist_uncorrected, r.hist_bins = np.histogram(
+        uncorrected_diffs, r.hist_bins, density=True
+    )
+    r.hist_corrected, r.hist_bins = np.histogram(
+        corrected_diffs, r.hist_bins, density=True
+    )
+
+    r.hist_uncorrupted, r.hist_bins = np.histogram(
+        uncorrupted_diffs, r.hist_bins, density=True
+    )
+
+    r.hist_bins = r.hist_bins[1:] - (r.hist_bins[1] - r.hist_bins[0]) / 2
+
+    #############################
+    # if corr_params["view"]["show_figures"]:
+    fig, ax = plt.subplots(1, 1, figsize=(4, 3), dpi=275)
+    ax.plot(
+        r.hist_bins,
+        r.hist_uncorrected,
+        "--",
+        color="black",
+        alpha=0.8,
+        label="uncorrected data",
+    )
+    ax.plot(
+        r.hist_bins,
+        r.hist_corrected,
+        color="black",
+        label="corrected data",
+    )
+
+    ax.grid(which="both")
+    plt.legend()
+    plt.title(
+        f"count rate: {parse_count_rate(data.stats['count_rate'])}, "
+        f"data_file: {data.params['data_file']}"
+    )
+    ax.set_xlabel("time (ps)")
+    ax.set_ylabel("counts (ps)")
+    if not corr_params["view"]["show_figures"]:
+        plt.close(fig)
+
+    r = plot_and_analyze_histogram(
+        r, corrected_diffs, uncorrected_diffs, uncorrupted_diffs, corr_params, edge
+    )
+
     r.corr_params = corr_params
     r.data_stats = data.stats
     r.data_params = data.params
@@ -827,7 +854,9 @@ def do_2d_calibration(cal_params, data):
     )  # returns diffs in nanoseconds
 
     prime_steps = cal_params["prime_steps"]
-    prime_1 = prime_1 / data.stats["pulse_rate"]
+    prime_1 = (
+        prime_1 / data.stats["pulse_rate"]
+    )  # prime_1 must be in units of ns before division
     prime_2 = prime_2 / data.stats["pulse_rate"]
     prime_1 = prime_1.astype("int")
     prime_2 = prime_2.astype("int")
@@ -1028,7 +1057,9 @@ if __name__ == "__main__":
         calibration_obj = do_calibration(params["calibration"], data)
 
     if params["do_calibration"] and params["do_correction"]:
-        print("calibrating and correcting data_file: ", params["data_file"])
+        print(
+            "calibrating and correcting data_file: ", params["calibration"]["data_file"]
+        )
         if params["correction"]["load_pre-generated_calibration"]:
             print(
                 "WARNING: the pre-generated calibration will not be used unless "
