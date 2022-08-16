@@ -390,10 +390,18 @@ def do_2d_correction(corr_params, calibration_obj, data):
     corrected = data.data_tags[2:-3] - shifts
     corrected_diffs = corrected - data.nearest_pulse_times[2:-3]
 
+    # mostly included for compatibility with 1d correction
+    data_tags = data.data_tags[2:-3]
+    nearest_pulse_times = data.nearest_pulse_times[2:-3]
+    uncorrupted_mask = diff_1 / 1000 > 200  # nanoseconds
+    uncorrupted_tags = data_tags[uncorrupted_mask]
+    uncorrupted_diffs = uncorrupted_tags - nearest_pulse_times[uncorrupted_mask]
+
     edge = int(data.stats["inter_pulse_time"] * 1000 / 2)
     const_offset = uncorrected_diffs.min()
     uncorrected_diffs = uncorrected_diffs - const_offset - edge  # cancel offset
     corrected_diffs = corrected_diffs - const_offset - edge
+    uncorrupted_diffs = uncorrupted_diffs - const_offset - edge
 
     r.hist_bins = np.arange(-edge, edge, 1)
     r.hist_uncorrected, r.hist_bins = np.histogram(
@@ -403,20 +411,56 @@ def do_2d_correction(corr_params, calibration_obj, data):
         corrected_diffs, r.hist_bins, density=True
     )
 
+    r.hist_uncorrupted, r.hist_bins = np.histogram(
+        uncorrupted_diffs, r.hist_bins, density=True
+    )
+
     hist, bins = np.histogram(shifts, bins=1000)
     plt.figure()
     plt.plot(bins[1:], hist)
     plt.title("shifts")
 
     r.hist_bins = r.hist_bins[1:] - (r.hist_bins[1] - r.hist_bins[0]) / 2
-    plt.figure()
-    plt.plot(r.hist_bins, r.hist_uncorrected, label="uncorrected")
-    plt.plot(r.hist_bins, r.hist_corrected, ls="--", label="corrected")
-    plt.title(
-        f"count rate: {parse_count_rate(data.stats['count_rate'])}, "
-        f"data_file: {data.params['data_file']}"
+
+    # plt.figure()
+    # plt.plot(r.hist_bins, r.hist_uncorrected, label="uncorrected")
+    # plt.plot(r.hist_bins, r.hist_corrected, ls="--", label="corrected")
+    # plt.title(
+    #     f"count rate: {parse_count_rate(data.stats['count_rate'])}, "
+    #     f"data_file: {data.params['data_file']}"
+    # )
+    # plt.legend()
+
+    r = plot_and_analyze_histogram(
+        r,
+        corrected_diffs,
+        uncorrected_diffs,
+        uncorrupted_diffs,
+        corr_params,
+        edge,
     )
-    plt.legend()
+
+    r.corr_params = corr_params
+    r.data_stats = data.stats
+    r.data_params = data.params
+
+    if corr_params["output"]["save_correction_result"]:
+        rg = corr_params["output"]["data_file_snip"]
+        file_name = (
+            corr_params["output"]["save_name"]
+            + "2d_"
+            + data.params["data_file"][rg[0] : rg[-1]]
+        )
+
+        r.export(
+            os.path.join(
+                corr_params["output"]["save_location"],
+                file_name,
+            ),
+            print_info=True,
+            include_time_inside=True,
+        )
+        return r
 
 
 def plot_and_analyze_histogram(
@@ -614,7 +658,9 @@ def plot_and_analyze_histogram(
     ax_lin.set_xlim(-edge, edge)
     if corr_params["output"]["save_fig"]:
         rg = corr_params["output"]["data_file_snip"]
-        save_name = data.params["data_file"][rg[0] : rg[-1]] + ".png"
+        save_name = (
+            f"{data.params['data_file'][rg[0] : rg[-1]]}_{corr_params['type']}.png"
+        )
         save_name = os.path.join(corr_params["output"]["save_location"], save_name)
         plt.savefig(save_name)
 

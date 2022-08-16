@@ -8,7 +8,7 @@ params:
       show_figures: True
       histogram_max_tags: 500000
     data_path: "C://Users//Andrew//Documents//peacoq_1_ghz//Wire_1//41mV"
-    data_file: "W1_41mV_3.0s_48.0.1.ttbin"
+    data_file: "W1_41mV_3.0s_40.5.1.ttbin"
     snspd_channel: -5
     clock_channel: 9
     data_limit: 5.0e+7 #number of raw time tags to decode. Without the '+', yaml will parse this incorrectly as a string.
