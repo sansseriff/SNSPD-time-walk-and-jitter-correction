@@ -1,39 +1,23 @@
-from TimeTagger import createTimeTagger, FileWriter, FileReader
+from TimeTagger import FileReader
 
-from time import sleep
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
-import matplotlib
 import os
 import numpy as np
 import yaml
 import time
-import json
-import timeit
-from bokeh.plotting import figure, output_file, show
-from scipy.stats import norm
-from numba import njit
 from scipy.interpolate import interp1d
-import math
 from scipy.stats import rv_continuous
 from scipy import special
 
 from clock_tools import clockLock
-from clock_tools import RepeatedPll
-from datetime import date
-import datetime
 import phd.viz
 import concurrent.futures
-import glob
-from matplotlib import cm
-from scipy.signal import find_peaks
-from os.path import exists
 from scipy.interpolate import CubicSpline, RegularGridInterpolator
 from mask_generators import MaskGenerator
 from data_obj import DataObj
-
 from tqdm import tqdm
-
+from utils import number_manager, get_file_list
 
 Colors, palette = phd.viz.phd_style(text=1)
 
@@ -339,16 +323,6 @@ def validate_roots(roots, right_lim, left_lim):
     return valid_roots
 
 
-def number_manager(number):
-    if number > 1e3:
-        val = f"{round(number/1000,1)} KCounts/s"
-    if number > 1e6:
-        val = f"{round(number/1e6,1)} MCounts/s"
-    if number > 1e9:
-        val = f"{round(number/1e9,1)} GCounts/s"
-    return val
-
-
 def do_correction(corr_params, calibration_obj, data):
     if corr_params["type"] == "1d":
         return do_1d_correction(corr_params, calibration_obj, data)
@@ -376,13 +350,11 @@ def do_2d_correction(corr_params, calibration_obj, data):
 
     # interpolator = interp2d(edges, edges, medians, "linear")
     func = RegularGridInterpolator(
-        (edges, edges), medians, bounds_error=False, fill_value=0
-    )
+        (edges, edges), medians, method="linear", bounds_error=False, fill_value=0
+    )  # looks like 'cubic' takes way too much memory??
 
-    print("len of diff_1 and diff_2:", len(diff_1), len(diff_2))
-    diff_12 = list(zip(diff_1, diff_2))
+    diff_12 = list(zip(diff_2, diff_1))
     shifts = func(diff_12)
-    # shifts = interpolator(diff_1, diff_2)  # now in picoseconds
 
     print("length of shifts: ", len(shifts))
     shifts = shifts * 1000
@@ -422,17 +394,9 @@ def do_2d_correction(corr_params, calibration_obj, data):
 
     r.hist_bins = r.hist_bins[1:] - (r.hist_bins[1] - r.hist_bins[0]) / 2
 
-    # plt.figure()
-    # plt.plot(r.hist_bins, r.hist_uncorrected, label="uncorrected")
-    # plt.plot(r.hist_bins, r.hist_corrected, ls="--", label="corrected")
-    # plt.title(
-    #     f"count rate: {parse_count_rate(data.stats['count_rate'])}, "
-    #     f"data_file: {data.params['data_file']}"
-    # )
-    # plt.legend()
-
     r = plot_and_analyze_histogram(
         r,
+        data,
         corrected_diffs,
         uncorrected_diffs,
         uncorrupted_diffs,
@@ -464,7 +428,7 @@ def do_2d_correction(corr_params, calibration_obj, data):
 
 
 def plot_and_analyze_histogram(
-    r, corrected_diffs, uncorrected_diffs, uncorrupted_diffs, corr_params, edge
+    r, data, corrected_diffs, uncorrected_diffs, uncorrupted_diffs, corr_params, edge
 ):
     # resolution or smoothing of CubicSpline is determined by the resolution
     # of these _interp arrays
@@ -613,6 +577,10 @@ def plot_and_analyze_histogram(
     ax.axvline(x=r.uncorrupted_mean, color="green")
     ax.axvline(x=r.uncorrupted_median, color="green", ls="--")
 
+    # data does not exit in local scope. And the global object is shared...
+    print("raw count rate: ", data.stats["count_rate"])
+
+    print(f"count rate: {number_manager(data.stats['count_rate'])}")
     title = f"count rate: {number_manager(data.stats['count_rate'])}"
     ax.set_title(title)
 
@@ -627,7 +595,6 @@ def plot_and_analyze_histogram(
         r.fwtm_corrected,
         r.fwhum_corrected,
     ]
-
     for line_obj in line_objs:
         label = f"{line_obj.label} {round(line_obj.roots(-1, 0), 1)} ps"
         ax.hlines(
@@ -661,7 +628,9 @@ def plot_and_analyze_histogram(
         save_name = (
             f"{data.params['data_file'][rg[0] : rg[-1]]}_{corr_params['type']}.png"
         )
+
         save_name = os.path.join(corr_params["output"]["save_location"], save_name)
+        print("saving figure to : ", save_name)
         plt.savefig(save_name)
 
     if not corr_params["view"]["show_figures"]:
@@ -753,7 +722,13 @@ def do_1d_correction(corr_params, calibration_obj, data):
         plt.close(fig)
 
     r = plot_and_analyze_histogram(
-        r, corrected_diffs, uncorrected_diffs, uncorrupted_diffs, corr_params, edge
+        r,
+        data,
+        corrected_diffs,
+        uncorrected_diffs,
+        uncorrupted_diffs,
+        corr_params,
+        edge,
     )
 
     r.corr_params = corr_params
@@ -1019,15 +994,6 @@ def do_1d_calibration(cal_params, data):
 #     # rep rate of the calibration set may be different than that of the corrected set.
 
 
-def sleeper(t, iter, tbla=0):
-    # time.sleep(t)
-    for i in range(1000):
-        q = np.sin(np.linspace(0, 5, 1000000))
-    print("sleeping for: ", t)
-    print("tbla is: ", tbla)
-    return t
-
-
 # class RunAnalysisCopier(object):
 #     def __init__(self, path, modu_params, DERIV, PROP, delayScan, delay, Figures):
 #         self.Path = path
@@ -1050,15 +1016,6 @@ def sleeper(t, iter, tbla=0):
 #             delay=self.Delay,
 #             Figures=self.Figures,
 #         )
-
-
-def get_file_list(path):
-    ls = os.listdir(path)
-    files = []
-    for item in ls:
-        if os.path.isfile(os.path.join(path, item)):
-            files.append(item)
-    return files
 
 
 class MultiprocessLoaderCorrector:
@@ -1091,8 +1048,7 @@ def caller(data_params, path, file, correction_params, calibration_object):
     return do_correction(correction_params, calibration_object, data)
 
 
-if __name__ == "__main__":
-
+def main():
     with open("analysis_params.yaml", "r") as f:
         params = yaml.safe_load(f)["params"]
 
@@ -1130,6 +1086,10 @@ if __name__ == "__main__":
                     params["correction"]["pre-generated_calibration"]["file"],
                 )
             )
+            print(
+                "using calibration file generated from file: ",
+                calibration_obj.data_params["data_file"],
+            )
             if params["correction"]["correct_multiple_files"]:
                 # override show_figures
 
@@ -1157,3 +1117,7 @@ if __name__ == "__main__":
                 "calibration file. Set 'do_calibration' to True, or set "
                 "'load_pre-generated_calibration' to True."
             )
+
+
+if __name__ == "__main__":
+    main()

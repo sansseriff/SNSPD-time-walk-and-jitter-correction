@@ -8,10 +8,10 @@ params:
       show_figures: True
       histogram_max_tags: 500000
     data_path: "C://Users//Andrew//Documents//peacoq_1_ghz//Wire_1//41mV"
-    data_file: "W1_41mV_3.0s_40.5.1.ttbin"
+    data_file: "W1_41mV_3.0s_47.0.1.ttbin"
     snspd_channel: -5
     clock_channel: 9
-    data_limit: 5.0e+7 #number of raw time tags to decode. Without the '+', yaml will parse this incorrectly as a string.
+    data_limit: 1.0e+7 #number of raw time tags to decode. Without the '+', yaml will parse this incorrectly as a string.
     delay_scan: False #should the program search for initial estimate of the timing offset bewteen the clock and snspd tags
     delay: -254 #restuls of the delay scan can be pasted here
     modulation_params:
@@ -51,7 +51,7 @@ params:
 
     output: # should go in calibration
       save_analysis_result: True
-      save_name: "./peacoq_results//Wire_1//41mV//calibration_results_"
+      save_name: "./peacoq_results//Wire_1//41mV//2d//calibration_results_"
 
 
   ### Correction
@@ -62,18 +62,18 @@ params:
       show_figures: True
     load_pre-generated_calibration: True
     pre-generated_calibration:
-      path: "./peacoq_results//Wire_1//41mV"
-      file: "calibration_results_2d_15.08.2022_15.25.42.json"
+      path: "./peacoq_results//Wire_1//41mV//2d//"
+      file: "calibration_results_2d_17.08.2022_09.23.03.json"
 
     correct_multiple_files: False # if True, the data path at the top will be ignored
-    multiple_files_path: "C://Users//Andrew//Documents//peacoq_1_ghz//Wire_1//41mV"
+    multiple_files_path: "C://Users//Andrew//Documents//peacoq_1_ghz//Wire_1//41mV//"
 
     spline_interpolation_resolution: 200 # controls the smoothing of the CubicSpline used for measuring FWHM, etc.
 
     output:
       save_fig: True
       save_correction_result: True
-      save_location: "./peacoq_results//Wire_1//41mV" # a single or multiple correction result files will go here.
+      save_location: "./peacoq_results//Wire_1//41mV//2d//" # a single or multiple correction result files will go here.
       save_name: "corrected_results_"
       data_file_snip: [0,-8] # defines snip of data file name that's included in results file
 
