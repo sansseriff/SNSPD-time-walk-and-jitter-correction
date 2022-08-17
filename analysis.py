@@ -270,9 +270,12 @@ def calculate_2d_diffs(data_tags, nearest_pulse_times, delay):
 
     # this makes more sense to me than using np.diff
     prime_1 = nearest_pulse_times[2:-2] - np.roll(nearest_pulse_times, 1)[2:-2]
-    prime_2 = (
-        np.roll(nearest_pulse_times, 1)[2:-2] - np.roll(nearest_pulse_times, 2)[2:-2]
-    )
+
+    # square
+    # prime_2 = np.roll(nearest_pulse_times,1)[2:-2] - np.roll(nearest_pulse_times, 2)[2:-2]
+
+    # triangle
+    prime_2 = nearest_pulse_times[2:-2] - np.roll(nearest_pulse_times, 2)[2:-2]
 
     return delays / 1000, prime_1 / 1000, prime_2 / 1000
 
@@ -330,41 +333,94 @@ def do_correction(corr_params, calibration_obj, data):
         return do_2d_correction(corr_params, calibration_obj, data)
 
 
+def custom_diff(tags):
+    res = tags - np.roll(tags, 1)
+    return res[1:]
+
+
+def custom_diff2(tags):
+    res = tags - np.roll(tags, 2)
+    return res[1:]
+
+
 def do_2d_correction(corr_params, calibration_obj, data):
     r = DataObj()  # results object
 
-    diff_1 = np.roll(np.diff(data.data_tags), 1)
-    diff_2 = np.roll(diff_1, 1)
+    # diff_1 = np.roll(np.diff(data.data_tags), 1)
+    # diff_2 = np.roll(diff_1, 1)
+    uncorrected_diffs = data.data_tags - data.nearest_pulse_times
+    uncorrected_diffs = uncorrected_diffs[3:-2]
+
+    diff_1 = custom_diff(data.data_tags)
+    diff_2 = custom_diff2(data.data_tags)
 
     diff_1 = diff_1[2:-2]
-    diff_2 = diff_2[2:-2]
 
-    uncorrected_diffs = data.data_tags - data.nearest_pulse_times
-    uncorrected_diffs = uncorrected_diffs[2:-3]
+    # #################################
+    # #################################
+    # diff_2 = diff_2[2:-2]
+    #
 
-    medians = calibration_obj.medians
+    #
+    # medians = calibration_obj.medians
+    #
+    # ################
+    # medians = np.roll(np.roll(medians, 0, axis=0), 0, axis=1)
+    # ################
+    #
+    # # make sure edges has the correct scaling from the calibration file
+    # # put edges in units of picoseconds
+    # edges = (np.arange(len(medians)) / calibration_obj.stats["pulse_rate"]) * 1000
+    #
+    # # interpolator = interp2d(edges, edges, medians, "linear")
+    # func = RegularGridInterpolator(
+    #     (edges, edges), medians, method="linear", bounds_error=False, fill_value=0
+    # )  # looks like 'cubic' takes way too much memory??
+    #
+    # diff_12 = list(zip(diff_1, diff_2))
+    # shifts = func(diff_12)
+    #
+    # print("length of shifts: ", len(shifts))
+    # shifts = shifts * 1000
+    # #################################
+    # #################################
+    # offsets = np.sum(calibration_obj.medians, axis=1) / 150
 
-    # make sure edges has the correct scaling from the calibration file
-    # put edges in units of picoseconds
-    edges = (np.arange(len(medians)) / calibration_obj.stats["pulse_rate"]) * 1000
+    fig, ax = plt.subplots(1, 1, figsize=(10, 3), dpi=100)
+    ax.imshow(np.array(calibration_obj.medians[7:150][5:150]) + 0.05, vmin=0, vmax=0.2)
+    ax.set_title(number_manager(calibration_obj.stats["count_rate"]))
 
-    # interpolator = interp2d(edges, edges, medians, "linear")
-    func = RegularGridInterpolator(
-        (edges, edges), medians, method="linear", bounds_error=False, fill_value=0
-    )  # looks like 'cubic' takes way too much memory??
+    plt.figure()
+    offsets = np.sum(calibration_obj.medians, axis=1) / 150
+    plt.plot(np.arange(len(offsets)), offsets, color="black")
+    # offsets = np.array(calibration_obj.medians[:][5]) * 0.85
+    # plt.plot(np.arange(len(offsets)), offsets)
+    # offsets = np.array(calibration_obj.medians[:][25]) * 0.85
+    # plt.plot(np.arange(len(offsets)), offsets)
+    # offsets = np.array(calibration_obj.medians[:][50]) * 0.85
+    # plt.plot(np.arange(len(offsets)), offsets)
 
-    diff_12 = list(zip(diff_2, diff_1))
-    shifts = func(diff_12)
+    print(calibration_obj.medians[:][-1])
+    print("#####################")
+    print(np.array(calibration_obj.medians)[:, -1])
 
-    print("length of shifts: ", len(shifts))
-    shifts = shifts * 1000
+    offsets = np.array(calibration_obj.medians)[:, -1] * 0.85
+    plt.plot(np.arange(len(offsets)), offsets)
 
-    corrected = data.data_tags[2:-3] - shifts
-    corrected_diffs = corrected - data.nearest_pulse_times[2:-3]
+    t_prime = (
+        np.arange(len(calibration_obj.medians)) / calibration_obj.stats["pulse_rate"]
+    ) * 1000
+
+    shifts = 1000 * np.interp(
+        diff_1, t_prime, offsets
+    )  # in picoseconds. Remove the 1st couple data
+
+    corrected = data.data_tags[3:-2] - shifts
+    corrected_diffs = corrected - data.nearest_pulse_times[3:-2]
 
     # mostly included for compatibility with 1d correction
-    data_tags = data.data_tags[2:-3]
-    nearest_pulse_times = data.nearest_pulse_times[2:-3]
+    data_tags = data.data_tags[3:-2]
+    nearest_pulse_times = data.nearest_pulse_times[3:-2]
     uncorrupted_mask = diff_1 / 1000 > 200  # nanoseconds
     uncorrupted_tags = data_tags[uncorrupted_mask]
     uncorrupted_diffs = uncorrupted_tags - nearest_pulse_times[uncorrupted_mask]
@@ -847,9 +903,18 @@ def do_2d_scan(prime_1_masks, prime_2_masks, delays, prime_steps):
                 std[i, j] = np.std(sub_delays)
 
     valid = counts > 10  # boolean mask
-    adjustment = np.mean(medians[-30:, -30:])
+    adjustment = np.mean(medians[130, -5:])
+    # the - number should be less 150 - 130 by several units...
+
     medians[valid] = medians[valid] - adjustment
     means[valid] = means[valid] - adjustment
+
+    if True:
+        plt.figure()
+        plt.plot(np.arange(len(medians[:, -5])), medians[:, -10])
+        plt.plot(np.arange(len(medians[:, -5])), medians[:, -5])
+        plt.plot(np.arange(len(medians[:, -5])), medians[:, -3])
+        plt.plot(np.arange(len(medians[:, -5])), medians[:, -1])
 
     return medians, means, std, counts
 
@@ -879,7 +944,7 @@ def do_2d_calibration(cal_params, data):
         prime_1 / data.stats["pulse_rate"]
     )  # prime_1 must be in units of ns before division
     prime_2 = prime_2 / data.stats["pulse_rate"]
-    prime_1 = prime_1.astype("int")
+    prime_1 = prime_1.astype("int")  # these would never be zero. They are accurate.
     prime_2 = prime_2.astype("int")
 
     prime_1_masks = []
@@ -901,6 +966,7 @@ def do_2d_calibration(cal_params, data):
     ax.set_ylabel("prime 2")
     ax.set_xlabel("prime_1")
     ax.plot_surface(x, y, medians)
+    ax.set_zlim(-0.1, 0.1)
 
     cal_results_obj.medians = medians
     cal_results_obj.means = means

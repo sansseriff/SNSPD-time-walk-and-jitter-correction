@@ -8,7 +8,7 @@ params:
       show_figures: True
       histogram_max_tags: 500000
     data_path: "C://Users//Andrew//Documents//peacoq_1_ghz//Wire_1//41mV"
-    data_file: "W1_41mV_3.0s_47.0.1.ttbin"
+    data_file: "W1_41mV_3.0s_57.0.1.ttbin"
     snspd_channel: -5
     clock_channel: 9
     data_limit: 1.0e+7 #number of raw time tags to decode. Without the '+', yaml will parse this incorrectly as a string.
@@ -63,7 +63,7 @@ params:
     load_pre-generated_calibration: True
     pre-generated_calibration:
       path: "./peacoq_results//Wire_1//41mV//2d//"
-      file: "calibration_results_2d_17.08.2022_09.23.03.json"
+      file: "calibration_results_2d_17.08.2022_11.44.30.json" # 2d: "calibration_results_2d_17.08.2022_11.44.30.json"
 
     correct_multiple_files: False # if True, the data path at the top will be ignored
     multiple_files_path: "C://Users//Andrew//Documents//peacoq_1_ghz//Wire_1//41mV//"
