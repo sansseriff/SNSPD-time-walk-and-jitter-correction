@@ -14,6 +14,7 @@ from clock_tools import clockLock
 import phd.viz
 import concurrent.futures
 from scipy.interpolate import CubicSpline, RegularGridInterpolator
+import scipy.interpolate as interpolate
 from mask_generators import MaskGenerator
 from data_obj import DataObj
 from tqdm import tqdm
@@ -313,7 +314,12 @@ class LineObj(DataObj):
         self.label = label
 
     def roots(self, index_1, index_2):
-        return self.root_list[index_1] - self.root_list[index_2]
+        try:
+            return self.root_list[index_1] - self.root_list[index_2]
+        except IndexError:
+            return 0
+        except TypeError:
+            return 0
 
 
 def validate_roots(roots, right_lim, left_lim):
@@ -323,7 +329,10 @@ def validate_roots(roots, right_lim, left_lim):
             continue
         else:
             valid_roots.append(root)
-    return valid_roots
+    if len(valid_roots) >= 2:
+        return valid_roots
+    else:
+        return [0, 0]
 
 
 def do_correction(corr_params, calibration_obj, data):
@@ -356,64 +365,101 @@ def do_2d_correction(corr_params, calibration_obj, data):
 
     diff_1 = diff_1[2:-2]
 
-    # #################################
-    # #################################
-    # diff_2 = diff_2[2:-2]
-    #
+    #################################
+    #################################
+    diff_2 = diff_2[2:-2]
 
-    #
-    # medians = calibration_obj.medians
-    #
-    # ################
-    # medians = np.roll(np.roll(medians, 0, axis=0), 0, axis=1)
-    # ################
-    #
-    # # make sure edges has the correct scaling from the calibration file
-    # # put edges in units of picoseconds
-    # edges = (np.arange(len(medians)) / calibration_obj.stats["pulse_rate"]) * 1000
-    #
-    # # interpolator = interp2d(edges, edges, medians, "linear")
-    # func = RegularGridInterpolator(
-    #     (edges, edges), medians, method="linear", bounds_error=False, fill_value=0
-    # )  # looks like 'cubic' takes way too much memory??
-    #
+    medians = np.array(calibration_obj.medians)
+
+    ################
+    medians = np.roll(np.roll(medians, 1, axis=0), 1, axis=1)
+    print(medians[:, -1])
+    ################
+
+    # make sure edges has the correct scaling from the calibration file
+    # put edges in units of picoseconds
+    edges = (np.arange(len(medians)) / calibration_obj.stats["pulse_rate"]) * 1000
+
+    # interpolator = interp2d(edges, edges, medians, "linear")
+    func = RegularGridInterpolator(
+        (edges, edges), medians, method="linear", bounds_error=False, fill_value=0
+    )  # looks like 'cubic' takes way too much memory??
+
+    # func = interp2d(edges, edges, z, kind="cubic")
+
+    spline = interpolate.RectBivariateSpline(edges, edges, medians)
+    # diff_12 = np.stack((diff_1, diff_2))
+
+    where_zero = diff_1 > 140000
+    where_1d_interp = diff_2 > 130000
+
+    where_2d_interp = ~(where_zero | where_1d_interp)
+
+    shifts = np.zeros(len(diff_1))
+
+    offsets = medians[:, -1]  # last row of the 2d interpolation used for far field
+    t_prime = (np.arange(len(medians)) / calibration_obj.stats["pulse_rate"]) * 1000
+
+    shifts[where_1d_interp] = 1000 * np.interp(
+        diff_1[where_1d_interp], t_prime, offsets
+    )  # in picoseconds. Remove the 1st couple data
+
+    shifts[where_zero] = np.zeros(
+        np.count_nonzero(where_zero)
+    )  # shouldn't even be needed
+
+    shifts[where_2d_interp] = 1000 * spline.ev(
+        diff_1[where_2d_interp], diff_2[where_2d_interp]
+    )
+
     # diff_12 = list(zip(diff_1, diff_2))
+
+    # print(np.shape(diff_12))
     # shifts = func(diff_12)
-    #
+
     # print("length of shifts: ", len(shifts))
     # shifts = shifts * 1000
-    # #################################
-    # #################################
+    # print(shifts[:100])
+    #################################
+    #################################
+
+    # #########################################
+    # #########################################
+    #
+    # fig, ax = plt.subplots(1, 1, figsize=(10, 3), dpi=100)
+    # ax.imshow(np.array(calibration_obj.medians[7:150][5:150]) + 0.05, vmin=0, vmax=0.2)
+    # ax.set_title(number_manager(calibration_obj.stats["count_rate"]))
+    #
+    # plt.figure()
     # offsets = np.sum(calibration_obj.medians, axis=1) / 150
-
-    fig, ax = plt.subplots(1, 1, figsize=(10, 3), dpi=100)
-    ax.imshow(np.array(calibration_obj.medians[7:150][5:150]) + 0.05, vmin=0, vmax=0.2)
-    ax.set_title(number_manager(calibration_obj.stats["count_rate"]))
-
-    plt.figure()
-    offsets = np.sum(calibration_obj.medians, axis=1) / 150
-    plt.plot(np.arange(len(offsets)), offsets, color="black")
-    # offsets = np.array(calibration_obj.medians[:][5]) * 0.85
+    # plt.plot(np.arange(len(offsets)), offsets, color="black")
+    # # offsets = np.array(calibration_obj.medians[:][5]) * 0.85
+    # # plt.plot(np.arange(len(offsets)), offsets)
+    # # offsets = np.array(calibration_obj.medians[:][25]) * 0.85
+    # # plt.plot(np.arange(len(offsets)), offsets)
+    # # offsets = np.array(calibration_obj.medians[:][50]) * 0.85
+    # # plt.plot(np.arange(len(offsets)), offsets)
+    #
+    # print(calibration_obj.medians[:][-1])
+    # print("#####################")
+    # print(np.array(calibration_obj.medians)[:, -1])
+    #
+    # offsets = np.array(calibration_obj.medians)[:, -1] * 0.85
     # plt.plot(np.arange(len(offsets)), offsets)
-    # offsets = np.array(calibration_obj.medians[:][25]) * 0.85
-    # plt.plot(np.arange(len(offsets)), offsets)
-    # offsets = np.array(calibration_obj.medians[:][50]) * 0.85
-    # plt.plot(np.arange(len(offsets)), offsets)
+    #
 
-    print(calibration_obj.medians[:][-1])
-    print("#####################")
-    print(np.array(calibration_obj.medians)[:, -1])
-
-    offsets = np.array(calibration_obj.medians)[:, -1] * 0.85
-    plt.plot(np.arange(len(offsets)), offsets)
-
-    t_prime = (
-        np.arange(len(calibration_obj.medians)) / calibration_obj.stats["pulse_rate"]
-    ) * 1000
-
-    shifts = 1000 * np.interp(
-        diff_1, t_prime, offsets
-    )  # in picoseconds. Remove the 1st couple data
+    # # #########################################
+    # # #########################################
+    # offsets = medians[:, -1]
+    # edges = (np.arange(len(medians)) / calibration_obj.stats["pulse_rate"]) * 1000
+    # t_prime = (np.arange(len(medians)) / calibration_obj.stats["pulse_rate"]) * 1000
+    # #
+    # shifts = 1000 * np.interp(
+    #     diff_1, t_prime, offsets
+    # )  # in picoseconds. Remove the 1st couple data
+    # print(shifts[:100])
+    # # #########################################
+    # # #########################################
 
     corrected = data.data_tags[3:-2] - shifts
     corrected_diffs = corrected - data.nearest_pulse_times[3:-2]
