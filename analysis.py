@@ -373,7 +373,7 @@ def do_2d_correction(corr_params, calibration_obj, data):
 
     ################
     medians = np.roll(np.roll(medians, 1, axis=0), 1, axis=1)
-    print(medians[:, -1])
+    # print(medians[:, -1])
     ################
 
     # make sure edges has the correct scaling from the calibration file
