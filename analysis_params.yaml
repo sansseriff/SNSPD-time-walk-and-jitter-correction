@@ -7,11 +7,11 @@ params:
     view:
       show_figures: True
       histogram_max_tags: 500000
-    data_path: "C://Users//Andrew//Documents//peacoq_1_ghz//Wire_1//41mV_15.2uA//"
-    data_file: "W1_41mV_1.5s_15.2uA_48.0.1.ttbin"
+    data_path: "C://Users//Andrew//Documents//peacoq_1_ghz//Wire_1//41mV//"
+    data_file: "W1_41mV_3.0s_46.0.1.ttbin"
     snspd_channel: -5
     clock_channel: 9
-    data_limit: 1.0e+7 #number of raw time tags to decode. Without the '+', yaml will parse this incorrectly as a string.
+    data_limit: 5.0e+8 #number of raw time tags to decode. Without the '+', yaml will parse this incorrectly as a string.
     delay_scan: False #should the program search for initial estimate of the timing offset bewteen the clock and snspd tags
     delay: -254 #restuls of the delay scan can be pasted here
     modulation_params:
@@ -27,9 +27,9 @@ params:
 
 
 ### Calibration
-  do_calibration: False
+  do_calibration: True
   calibration:
-    type: '2d' # options are '1d' or '2d'
+    type: '3d' # options are '1d' or '2d'
     view:
       show_figures: True
     analysis_range: 200000 #picoseconds
@@ -52,11 +52,11 @@ params:
 
     output:
       save_analysis_result: True
-      save_name: "./peacoq_results//Wire_1//41mV_15.2uA//2d//calibration_results_"
+      save_name: "./peacoq_results//Wire_1//41mV//3d//calibration_results_"
 
 
   ### Correction
-  do_correction: True # TODO unknown behavior when this and correct_multiple are on
+  do_correction: False # TODO unknown behavior when this and correct_multiple are on
   correction:
     type: '2d' # options are '1d' or '2d'
     view:

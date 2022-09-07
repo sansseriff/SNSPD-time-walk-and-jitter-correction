@@ -15,6 +15,7 @@ import scipy.interpolate as interpolate
 from mask_generators import MaskGenerator
 from data_obj import DataObj
 from tqdm import tqdm
+from numba import njit
 
 from plotting import (
     checkLocking,
@@ -214,6 +215,22 @@ def calculate_2d_diffs(data_tags, nearest_pulse_times, delay):
     prime_2 = nearest_pulse_times[2:-2] - np.roll(nearest_pulse_times, 2)[2:-2]
 
     return delays / 1000, prime_1 / 1000, prime_2 / 1000
+
+
+def calculate_3d_diffs(data_tags, nearest_pulse_times, delay):
+    delays = data_tags[2:-2] + delay - nearest_pulse_times[2:-2]
+
+    # this makes more sense to me than using np.diff
+    prime_1 = nearest_pulse_times[2:-2] - np.roll(nearest_pulse_times, 1)[2:-2]
+
+    # square
+    # prime_2 = np.roll(nearest_pulse_times,1)[2:-2] - np.roll(nearest_pulse_times, 2)[2:-2]
+
+    # triangle
+    prime_2 = nearest_pulse_times[2:-2] - np.roll(nearest_pulse_times, 2)[2:-2]
+    prime_3 = nearest_pulse_times[2:-2] - np.roll(nearest_pulse_times, 3)[2:-2]
+
+    return delays / 1000, prime_1 / 1000, prime_2 / 1000, prime_3 / 1000
 
 
 def do_correction(corr_params, calibration_obj, data):
@@ -641,14 +658,239 @@ def do_2d_scan(prime_1_masks, prime_2_masks, delays, prime_steps, min_sub_delay)
     return medians, means, std, counts
 
 
+def do_3d_scan(
+    prime_1_masks, prime_2_masks, prime_3_masks, delays, prime_steps, min_sub_delay
+):
+
+    medians = np.zeros((prime_steps, prime_steps, prime_steps))
+    means = np.zeros((prime_steps, prime_steps, prime_steps))
+    std = np.zeros((prime_steps, prime_steps, prime_steps))
+    counts = np.zeros((prime_steps, prime_steps, prime_steps))
+
+    for i in tqdm(range(len(prime_1_masks))):
+        print("iteration: ", i, "of ", len(prime_1_masks))
+        mask_1 = prime_1_masks[i]
+        for j in range(len(prime_2_masks)):
+            # print("     iteration: ", j, "of ", len(prime_1_masks))
+            mask_2 = mask_1 & prime_2_masks[j]
+            for k in range(len(prime_3_masks)):
+                mask_3 = mask_2 & prime_3_masks[k]
+                sub_delays = delays[mask_3]
+                counts[i, j, k] = len(sub_delays)
+
+                if len(sub_delays) > min_sub_delay:
+                    # print(len(sub_delays))
+                    medians[i, j, k] = np.median(sub_delays)
+                    means[i, j, k] = np.mean(sub_delays)
+                    std[i, j, k] = np.std(sub_delays)
+
+    valid = counts > 10  # boolean mask
+    adjustment = np.mean(medians[130, -5:, -5:])
+    # the - number should be less 150 - 130 by several units...
+
+    medians[valid] = medians[valid] - adjustment
+    means[valid] = means[valid] - adjustment
+
+    if False:
+        plt.figure()
+        plt.plot(np.arange(len(medians[:, -5, 130])), medians[:, -10])
+        plt.plot(np.arange(len(medians[:, -5, 130])), medians[:, -5])
+        plt.plot(np.arange(len(medians[:, -5, 130])), medians[:, -3])
+        plt.plot(np.arange(len(medians[:, -5, 130])), medians[:, -1])
+
+    return medians, means, std, counts
+
+
 def do_calibration(cal_params, data):
     if cal_params["type"] == "1d":
         return do_1d_calibration(cal_params, data)
     if cal_params["type"] == "2d":
         return do_2d_calibration(cal_params, data)
+    if cal_params["type"] == "3d":
+        return do_3d_calibration(cal_params, data)
     else:
-        print("calibration type unknown: [use '1d' or '2d']")
+        print("calibration type unknown: [use '1d' or '2d' or '3d']")
         quit()
+
+
+@njit
+def linear_3d_scan(prime_1, prime_2, prime_3, delays, prime_steps):
+
+    # medians = np.zeros((prime_steps, prime_steps, prime_steps))
+    # means = np.zeros((prime_steps, prime_steps, prime_steps))
+    # std = np.zeros((prime_steps, prime_steps, prime_steps))
+    # counts = np.zeros((prime_steps, prime_steps, prime_steps))
+    print("length of delays: ", len(delays))
+
+    stack_length = int(len(delays) / (prime_steps**3)) * 5
+    print("stack length: ", stack_length)
+
+    master_counts = np.empty((prime_steps, prime_steps, prime_steps, stack_length))
+    placement = np.zeros((prime_steps, prime_steps, prime_steps)).astype("int")
+
+    master_counts[:] = np.nan
+    printed_100 = True
+    printed_10 = True
+
+    for i in range(len(delays)):
+        if i == 0:
+            print("starting")
+        if (i > len(delays) / 100) and printed_100:
+            print("more than 1%")
+            printed_100 = False
+
+        if (i > len(delays) / 10) and printed_10:
+            print("more than 10%")
+            printed_10 = False
+
+        if i < 3:
+            continue
+        if prime_1[i] < prime_steps:
+            loc1 = prime_1[i]
+        else:
+            continue
+
+        if prime_2[i] < prime_steps:
+            loc2 = prime_2[i]
+        else:
+            continue
+
+        if prime_3[i] < prime_steps:
+            loc3 = prime_3[i]
+        else:
+            continue
+
+        place = placement[loc1, loc2, loc3]
+        if place < stack_length:
+            master_counts[loc1, loc2, loc3, placement[loc1, loc2, loc3]] = delays[i]
+            placement[loc1, loc2, loc3] = placement[loc1, loc2, loc3] + 1
+
+    return master_counts, placement, stack_length
+
+
+def compute_3d_stats(master_counts, placement, stack_length):
+    medians = np.nanmedian(master_counts, axis=3)
+    means = np.nanmean(master_counts, axis=3)
+    std = np.nanstd(master_counts, axis=3)
+    # counts = stack_length - np.count_nonzero(np.isnan(master_counts), axis=3)
+    counts = placement - 1
+
+    adjustment = np.mean(medians[-10:, -10:, -10:])
+
+    return medians, means, std, counts
+
+
+def do_3d_calibration(cal_params, data):
+    cal_results_obj = DataObj()  # for storing results of calibration
+    cal_results_obj.calibration_type = "3d"
+    cal_results_obj.stats = data.stats
+    cal_results_obj.data_params = data.params
+    cal_results_obj.cal_params = cal_params
+
+    delays, prime_1, prime_2, prime_3 = calculate_3d_diffs(
+        data.data_tags, data.nearest_pulse_times, data.params["delay"]
+    )  # returns diffs in nanoseconds
+
+    prime_steps = cal_params["prime_steps"]
+    prime_1 = (
+        prime_1 / data.stats["pulse_rate"]
+    )  # prime_1 must be in units of ns before division
+    prime_2 = prime_2 / data.stats["pulse_rate"]
+    prime_3 = prime_3 / data.stats["pulse_rate"]
+
+    prime_1 = prime_1.astype("int")  # these would never be zero. They are accurate.
+    prime_2 = prime_2.astype("int")
+    prime_3 = prime_3.astype("int")
+
+    master_counts, placement, stack_length = linear_3d_scan(
+        prime_1, prime_2, prime_3, delays, prime_steps
+    )
+
+    medians, means, std, counts = compute_3d_stats(
+        master_counts, placement, stack_length
+    )
+
+    # prime_1_masks = []
+    # prime_2_masks = []
+    # prime_3_masks = []
+    #
+    # for i in tqdm(range(prime_steps)):
+    #     prime_1_masks.append(prime_1 == i)
+    #     prime_2_masks.append(prime_2 == i)
+    #     prime_3_masks.append(prime_3 == i)
+    #
+    # medians, means, std, counts = do_3d_scan(
+    #     prime_1_masks,
+    #     prime_2_masks,
+    #     prime_3_masks,
+    #     delays,
+    #     prime_steps,
+    #     cal_params["min_sub_delay"],
+    # )
+
+    # remove some outliers?
+    # mask = np.roll(np.roll(np.eye(len(medians)), 3, axis=1), -3, axis=0).astype("bool")
+    # medians[mask] = 0
+    # medians[0:7, 27:] = 0
+    # medians[0:7, :14] = 0
+
+    x = np.arange(0, prime_steps)
+    y = np.arange(0, prime_steps)
+    x, y = np.meshgrid(x, y)
+    fig, ax = plt.subplots(subplot_kw={"projection": "3d"})
+    ax.set_ylabel("prime 2")
+    ax.set_xlabel("prime_1")
+    ax.plot_surface(x, y, medians[:, :, 149])
+    ax.set_zlim(-0.1, 0.1)
+
+    cal_results_obj.medians = medians
+    cal_results_obj.means = means
+    cal_results_obj.std = std
+    cal_results_obj.counts = counts
+
+    if cal_params["output"]["save_analysis_result"]:
+        save_name = cal_results_obj.export(
+            cal_params["output"]["save_name"] + "3d_",
+            include_time=True,
+            print_info=True,
+        )
+
+    fig, ax = plt.subplots(1, 5, figsize=(13, 7), dpi=180)
+    ax[0].imshow(
+        medians[: cal_params["prime_steps"], : cal_params["prime_steps"], 20],
+        vmin=-0.05,
+        vmax=0.30,
+    )
+    ax[0].set_title(number_manager(data.stats["count_rate"]) + "t''' = 20")
+
+    ax[1].imshow(
+        medians[: cal_params["prime_steps"], : cal_params["prime_steps"], 50],
+        vmin=-0.05,
+        vmax=0.30,
+    )
+    ax[1].set_title(number_manager(data.stats["count_rate"]) + "t''' = 50")
+
+    ax[2].imshow(
+        medians[: cal_params["prime_steps"], : cal_params["prime_steps"], 130],
+        vmin=-0.05,
+        vmax=0.30,
+    )
+    ax[2].set_title(number_manager(data.stats["count_rate"]) + "t''' = 130")
+
+    ax[3].imshow(counts[: cal_params["prime_steps"], : cal_params["prime_steps"], 140])
+    ax[3].set_title(f"max counts at 140: {np.max(counts)}")
+
+    im = ax[4].imshow(
+        std[: cal_params["prime_steps"], : cal_params["prime_steps"], 100]
+    )
+    ax[4].set_title(f"standard deviation at 100")
+    divider = make_axes_locatable(ax[2])
+    cax = divider.append_axes("right", size="5%", pad=0.05)
+    fig.colorbar(im, cax=cax)
+
+    plt.savefig(f"{save_name}.png")
+
+    return cal_results_obj
 
 
 def do_2d_calibration(cal_params, data):
