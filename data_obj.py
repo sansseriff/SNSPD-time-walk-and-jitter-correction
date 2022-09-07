@@ -34,12 +34,16 @@ class DataObj:
             dt_string = now.strftime("%d.%m.%Y_%H.%M.%S")
             dic["date_time"] = dt_string
         strb = orjson.dumps(dic, option=orjson.OPT_SERIALIZE_NUMPY)
+
         if name[-5:] != ".json":
-            name = name + ".json"
-        with open(name, "wb") as file:
+            json_name = name + ".json"
+        else:
+            json_name = name
+        with open(json_name, "wb") as file:
             file.write(strb)
         if print_info:
             print("Saving data as: ", name)
+        return name  # if I want to save other file types with same name
 
     def load_file(self, name):
         with open(name, "rb") as file:

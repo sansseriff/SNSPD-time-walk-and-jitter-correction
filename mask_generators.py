@@ -90,6 +90,7 @@ class MaskGenerator:
         of distributions along the t' vs delay curve.
         :param low_cutoff: number of skipped pulses at the beginning (small t'). For very short time scales there
         can be nonsensical distributions of counts that should ignored
+        :param fig_name: name of figure that shows calibration curve
         """
         adjustment_prop = params["adjustment_prop"]
         adjustment_mult = params["adjustment_mult"]
@@ -129,6 +130,7 @@ class MaskGenerator:
         d.l_widths = np.zeros(len(self.pulses))
         d.offsets = np.zeros(len(self.pulses))
         d.fwhm_ranges = np.zeros(len(self.pulses))
+        d.std = np.zeros(len(self.pulses))
         insufficient_counts_begin = 0
         insufficient_counts_end = 0
         adding_counts = 0
@@ -143,12 +145,8 @@ class MaskGenerator:
                 continue
             section = self.diffs[(self.diffs > t_start[jj]) & (self.diffs < t_end[jj])]
             section_org = section
-            section = section[
-                : params["max_section_tags"]
-            ]  # don't need more stats than this for accurate mean and sigma.
-            if (
-                len(section) > 10
-            ):  # if more than 5 counts, try to fit the counts to a guassian
+            section = section[: params["max_section_tags"]]
+            if len(section) > 10:
                 adding_counts += 1
                 bins_idx_left = np.searchsorted(self.bins, t_start[jj], side="left") - 1
                 bins_idx_right = np.searchsorted(self.bins, t_end[jj], side="left")
@@ -198,6 +196,7 @@ class MaskGenerator:
                 d.t_prime[jj] = pulse
                 d.counts[jj] = len(section_org)
                 d.offsets[jj] = np.median(section) - pulse
+                d.std[jj] = np.std(section) / np.sqrt(len(section))  # want std of avg
 
                 # how do I end the analysis gracefully?
                 # if not enough counts, don't analyze it.
@@ -245,6 +244,7 @@ class MaskGenerator:
         d.l_widths = d.l_widths[left:right]
         d.offsets = d.offsets[left:right]
         d.fwhm_ranges = d.fwhm_ranges[left:right]
+        d.std = d.std[left:right]
 
         # adjust the offsets graph so that the last fifth is centered around zero
         fifth = int(len(d.offsets) / 5)
@@ -258,13 +258,23 @@ class MaskGenerator:
                 self.pulses + adjustment, 0, self.hist_max, lw=5, alpha=0.3, color="red"
             )
 
-            plt.figure()
-            plt.grid()
-            plt.plot(d.t_prime, d.offsets)
+            d.fig, d.ax = plt.subplots(1, 1, figsize=(6, 4))
+
+            d.ax.grid()
+            d.ax.plot(d.t_prime, d.offsets)
             if bootstrap_errorbars:
                 plt.errorbar(d.t_prime, d.offsets, d.ranges, elinewidth=5, alpha=0.3)
-            plt.plot(d.t_prime[-fifth:], d.offsets[-fifth:], lw=2, color="red")
-            plt.title("delay vs t_prime curve")
+            d.ax.plot(d.t_prime[-fifth:], d.offsets[-fifth:], lw=2, color="red")
+            d.ax.errorbar(
+                d.t_prime,
+                d.offsets,
+                yerr=d.std,
+                elinewidth=5,
+                alpha=0.3,
+            )
+            d.ax.set_title("delay vs t' curve")
+            d.ax.set_ylabel("offset (ns)")
+            d.ax.set_xlabel("t' (ns)")
 
             plt.figure()
             plt.grid()

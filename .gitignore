@@ -2,12 +2,20 @@
 *.ipynb
 *.html
 *.png
+*.pptx
+*.zip
+*.docx
+*.mat
+
 
 .idea/
 __pycache__/
 .ipynb_checkpoints/
 sim/
+peacoq_results/
 
 analysis_500mhz.py
 correction_1ghz.py
 bokeh_testing.py
+Wire_16_40Mcps.py
+
