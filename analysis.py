@@ -238,6 +238,8 @@ def do_correction(corr_params, calibration_obj, data):
         return do_1d_correction(corr_params, calibration_obj, data)
     if corr_params["type"] == "2d":
         return do_2d_correction(corr_params, calibration_obj, data)
+    if corr_params["type"] == "3d":
+        return do_3d_correction(corr_params, calibration_obj, data)
 
 
 def custom_diff(tags):
@@ -250,131 +252,67 @@ def custom_diff2(tags):
     return res[1:]
 
 
-def do_2d_correction(corr_params, calibration_obj, data):
-    r = DataObj()  # results object
+def custom_diff3(tags):
+    res = tags - np.roll(tags, 3)
+    return res[1:]
 
-    # diff_1 = np.roll(np.diff(data.data_tags), 1)
-    # diff_2 = np.roll(diff_1, 1)
+
+def do_3d_correction(corr_params, calibration_obj, data):
+    r = DataObj()  # results object
     uncorrected_diffs = data.data_tags - data.nearest_pulse_times
     uncorrected_diffs = uncorrected_diffs[3:-2]
-
     diff_1 = custom_diff(data.data_tags)
     diff_2 = custom_diff2(data.data_tags)
-
+    diff_3 = custom_diff3(data.data_tags)
     diff_1 = diff_1[2:-2]
-
+    diff_2 = diff_2[2:-2]
+    diff_3 = diff_3[2:-2]
     if True:
         plt.figure()
         hist, bins = np.histogram(diff_1, bins=500)
         plt.plot(bins[1:], hist)
         plt.title("diff distribution")
 
-    #################################
-    #################################
-    diff_2 = diff_2[2:-2]
-
     medians = np.array(calibration_obj.medians)
-
-    ################
-    medians = np.roll(np.roll(medians, 1, axis=0), 1, axis=1)
-    # print(medians[:, -1])
-    ################
-
+    medians = np.roll(np.roll(np.roll(medians, 1, axis=0), 1, axis=1), 1, axis=2)
     # make sure edges has the correct scaling from the calibration file
     # put edges in units of picoseconds
     edges = (np.arange(len(medians)) / calibration_obj.stats["pulse_rate"]) * 1000
-
-    # interpolator = interp2d(edges, edges, medians, "linear")
-    func = RegularGridInterpolator(
-        (edges, edges), medians, method="linear", bounds_error=False, fill_value=0
-    )  # looks like 'cubic' takes way too much memory??
-
-    # func = interp2d(edges, edges, z, kind="cubic")
-
-    spline = interpolate.RectBivariateSpline(edges, edges, medians)
-    # diff_12 = np.stack((diff_1, diff_2))
-
+    spline_2d = interpolate.RectBivariateSpline(edges, edges, medians[:, :, -1])
+    spline_3d = interpolate.RegularGridInterpolator(
+        (edges, edges, edges), medians, method="linear"
+    )
     where_zero = diff_1 > 140000
     where_1d_interp = diff_2 > 130000
-
-    where_2d_interp = ~(where_zero | where_1d_interp)
+    where_2d_interp = diff_3 > 130000
+    where_3d_interp = ~(where_zero | where_1d_interp | where_2d_interp)
 
     shifts = np.zeros(len(diff_1))
-
-    offsets = medians[:, -1]  # last row of the 2d interpolation used for far field
+    medians_1d = medians[:, -1, -1]
+    # last row of the 2d interpolation used for far field
     t_prime = (np.arange(len(medians)) / calibration_obj.stats["pulse_rate"]) * 1000
-
-    shifts[where_1d_interp] = 1000 * np.interp(
-        diff_1[where_1d_interp], t_prime, offsets
-    )  # in picoseconds. Remove the 1st couple data
 
     shifts[where_zero] = np.zeros(
         np.count_nonzero(where_zero)
     )  # shouldn't even be needed
-
-    shifts[where_2d_interp] = 1000 * spline.ev(
+    shifts[where_1d_interp] = 1000 * np.interp(
+        diff_1[where_1d_interp], t_prime, medians_1d
+    )  # in picoseconds. Remove the 1st couple data
+    shifts[where_2d_interp] = 1000 * spline_2d.ev(
         diff_1[where_2d_interp], diff_2[where_2d_interp]
     )
-
-    # diff_12 = list(zip(diff_1, diff_2))
-
-    # print(np.shape(diff_12))
-    # shifts = func(diff_12)
-
-    # print("length of shifts: ", len(shifts))
-    # shifts = shifts * 1000
-    # print(shifts[:100])
-    #################################
-    #################################
-
-    # #########################################
-    # #########################################
-    #
-    # fig, ax = plt.subplots(1, 1, figsize=(10, 3), dpi=100)
-    # ax.imshow(np.array(calibration_obj.medians[7:150][5:150]) + 0.05, vmin=0, vmax=0.2)
-    # ax.set_title(number_manager(calibration_obj.stats["count_rate"]))
-    #
-    # plt.figure()
-    # offsets = np.sum(calibration_obj.medians, axis=1) / 150
-    # plt.plot(np.arange(len(offsets)), offsets, color="black")
-    # # offsets = np.array(calibration_obj.medians[:][5]) * 0.85
-    # # plt.plot(np.arange(len(offsets)), offsets)
-    # # offsets = np.array(calibration_obj.medians[:][25]) * 0.85
-    # # plt.plot(np.arange(len(offsets)), offsets)
-    # # offsets = np.array(calibration_obj.medians[:][50]) * 0.85
-    # # plt.plot(np.arange(len(offsets)), offsets)
-    #
-    # print(calibration_obj.medians[:][-1])
-    # print("#####################")
-    # print(np.array(calibration_obj.medians)[:, -1])
-    #
-    # offsets = np.array(calibration_obj.medians)[:, -1] * 0.85
-    # plt.plot(np.arange(len(offsets)), offsets)
-    #
-
-    # # #########################################
-    # # #########################################
-    # offsets = medians[:, -1]
-    # edges = (np.arange(len(medians)) / calibration_obj.stats["pulse_rate"]) * 1000
-    # t_prime = (np.arange(len(medians)) / calibration_obj.stats["pulse_rate"]) * 1000
-    # #
-    # shifts = 1000 * np.interp(
-    #     diff_1, t_prime, offsets
-    # )  # in picoseconds. Remove the 1st couple data
-    # print(shifts[:100])
-    # # #########################################
-    # # #########################################
+    shifts[where_3d_interp] = 1000 * spline_3d(
+        (diff_1[where_3d_interp], diff_2[where_3d_interp], diff_3[where_3d_interp])
+    )
 
     corrected = data.data_tags[3:-2] - shifts
     corrected_diffs = corrected - data.nearest_pulse_times[3:-2]
-
     # mostly included for compatibility with 1d correction
     data_tags = data.data_tags[3:-2]
     nearest_pulse_times = data.nearest_pulse_times[3:-2]
     uncorrupted_mask = diff_1 / 1000 > 200  # nanoseconds
     uncorrupted_tags = data_tags[uncorrupted_mask]
     uncorrupted_diffs = uncorrupted_tags - nearest_pulse_times[uncorrupted_mask]
-
     edge = int(data.stats["inter_pulse_time"] * 1000 / 2)
     const_offset = uncorrected_diffs.min()
     uncorrected_diffs = uncorrected_diffs - const_offset - edge  # cancel offset
@@ -409,7 +347,106 @@ def do_2d_correction(corr_params, calibration_obj, data):
         corr_params,
         edge,
     )
+    r.corr_params = corr_params
+    r.data_stats = data.stats
+    r.data_params = data.params
 
+    if corr_params["output"]["save_correction_result"]:
+        rg = corr_params["output"]["data_file_snip"]
+        file_name = (
+            corr_params["output"]["save_name"]
+            + corr_params["type"]
+            + "_"
+            + data.params["data_file"][rg[0] : rg[-1]]
+        )
+
+        r.export(
+            os.path.join(
+                corr_params["output"]["save_location"],
+                file_name,
+            ),
+            print_info=True,
+            include_time_inside=True,
+        )
+        return r
+
+
+def do_2d_correction(corr_params, calibration_obj, data):
+    r = DataObj()  # results object
+    uncorrected_diffs = data.data_tags - data.nearest_pulse_times
+    uncorrected_diffs = uncorrected_diffs[3:-2]
+    diff_1 = custom_diff(data.data_tags)
+    diff_2 = custom_diff2(data.data_tags)
+    diff_1 = diff_1[2:-2]
+    if True:
+        plt.figure()
+        hist, bins = np.histogram(diff_1, bins=500)
+        plt.plot(bins[1:], hist)
+        plt.title("diff distribution")
+    diff_2 = diff_2[2:-2]
+    medians = np.array(calibration_obj.medians)
+    medians = np.roll(np.roll(medians, 1, axis=0), 1, axis=1)
+    # make sure edges has the correct scaling from the calibration file
+    # put edges in units of picoseconds
+    edges = (np.arange(len(medians)) / calibration_obj.stats["pulse_rate"]) * 1000
+    spline = interpolate.RectBivariateSpline(edges, edges, medians)
+    where_zero = diff_1 > 140000
+    where_1d_interp = diff_2 > 130000
+    where_2d_interp = ~(where_zero | where_1d_interp)
+    shifts = np.zeros(len(diff_1))
+    offsets = medians[:, -1]  # last row of the 2d interpolation used for far field
+    t_prime = (np.arange(len(medians)) / calibration_obj.stats["pulse_rate"]) * 1000
+    shifts[where_1d_interp] = 1000 * np.interp(
+        diff_1[where_1d_interp], t_prime, offsets
+    )  # in picoseconds. Remove the 1st couple data
+    shifts[where_zero] = np.zeros(
+        np.count_nonzero(where_zero)
+    )  # shouldn't even be needed
+    shifts[where_2d_interp] = 1000 * spline.ev(
+        diff_1[where_2d_interp], diff_2[where_2d_interp]
+    )
+    corrected = data.data_tags[3:-2] - shifts
+    corrected_diffs = corrected - data.nearest_pulse_times[3:-2]
+    # mostly included for compatibility with 1d correction
+    data_tags = data.data_tags[3:-2]
+    nearest_pulse_times = data.nearest_pulse_times[3:-2]
+    uncorrupted_mask = diff_1 / 1000 > 200  # nanoseconds
+    uncorrupted_tags = data_tags[uncorrupted_mask]
+    uncorrupted_diffs = uncorrupted_tags - nearest_pulse_times[uncorrupted_mask]
+    edge = int(data.stats["inter_pulse_time"] * 1000 / 2)
+    const_offset = uncorrected_diffs.min()
+    uncorrected_diffs = uncorrected_diffs - const_offset - edge  # cancel offset
+    corrected_diffs = corrected_diffs - const_offset - edge
+    uncorrupted_diffs = uncorrupted_diffs - const_offset - edge
+
+    r.hist_bins = np.arange(-edge, edge, 1)
+    r.hist_uncorrected, r.hist_bins = np.histogram(
+        uncorrected_diffs, r.hist_bins, density=True
+    )
+    r.hist_corrected, r.hist_bins = np.histogram(
+        corrected_diffs, r.hist_bins, density=True
+    )
+
+    r.hist_uncorrupted, r.hist_bins = np.histogram(
+        uncorrupted_diffs, r.hist_bins, density=True
+    )
+
+    hist, bins = np.histogram(shifts, bins=1000)
+    plt.figure()
+    plt.plot(bins[1:], hist)
+    plt.title("shifts")
+
+    r.hist_bins = r.hist_bins[1:] - (r.hist_bins[1] - r.hist_bins[0]) / 2
+
+    r = plot_and_analyze_histogram(
+        r,
+        data,
+        corrected_diffs,
+        uncorrected_diffs,
+        uncorrupted_diffs,
+        corr_params,
+        edge,
+    )
     r.corr_params = corr_params
     r.data_stats = data.stats
     r.data_params = data.params
@@ -715,19 +752,11 @@ def do_calibration(cal_params, data):
 
 @njit
 def linear_3d_scan(prime_1, prime_2, prime_3, delays, prime_steps):
-
-    # medians = np.zeros((prime_steps, prime_steps, prime_steps))
-    # means = np.zeros((prime_steps, prime_steps, prime_steps))
-    # std = np.zeros((prime_steps, prime_steps, prime_steps))
-    # counts = np.zeros((prime_steps, prime_steps, prime_steps))
     print("length of delays: ", len(delays))
-
     stack_length = int(len(delays) / (prime_steps**3)) * 5
     print("stack length: ", stack_length)
-
     master_counts = np.empty((prime_steps, prime_steps, prime_steps, stack_length))
     placement = np.zeros((prime_steps, prime_steps, prime_steps)).astype("int")
-
     master_counts[:] = np.nan
     printed_100 = True
     printed_10 = True
@@ -775,7 +804,13 @@ def compute_3d_stats(master_counts, placement, stack_length):
     # counts = stack_length - np.count_nonzero(np.isnan(master_counts), axis=3)
     counts = placement - 1
 
-    adjustment = np.mean(medians[-10:, -10:, -10:])
+    # far field corner should average to zero
+    adjustment = np.nanmean(medians[120:, 120:, 140])
+
+    # print(medians[120:, 120:, 140])
+    print("adjustment: ", adjustment)
+    medians = medians - adjustment
+    means = means - adjustment
 
     return medians, means, std, counts
 
@@ -810,30 +845,6 @@ def do_3d_calibration(cal_params, data):
         master_counts, placement, stack_length
     )
 
-    # prime_1_masks = []
-    # prime_2_masks = []
-    # prime_3_masks = []
-    #
-    # for i in tqdm(range(prime_steps)):
-    #     prime_1_masks.append(prime_1 == i)
-    #     prime_2_masks.append(prime_2 == i)
-    #     prime_3_masks.append(prime_3 == i)
-    #
-    # medians, means, std, counts = do_3d_scan(
-    #     prime_1_masks,
-    #     prime_2_masks,
-    #     prime_3_masks,
-    #     delays,
-    #     prime_steps,
-    #     cal_params["min_sub_delay"],
-    # )
-
-    # remove some outliers?
-    # mask = np.roll(np.roll(np.eye(len(medians)), 3, axis=1), -3, axis=0).astype("bool")
-    # medians[mask] = 0
-    # medians[0:7, 27:] = 0
-    # medians[0:7, :14] = 0
-
     x = np.arange(0, prime_steps)
     y = np.arange(0, prime_steps)
     x, y = np.meshgrid(x, y)
@@ -843,10 +854,10 @@ def do_3d_calibration(cal_params, data):
     ax.plot_surface(x, y, medians[:, :, 149])
     ax.set_zlim(-0.1, 0.1)
 
-    cal_results_obj.medians = medians
-    cal_results_obj.means = means
-    cal_results_obj.std = std
-    cal_results_obj.counts = counts
+    cal_results_obj.medians = np.nan_to_num(medians)
+    cal_results_obj.means = np.nan_to_num(means)
+    cal_results_obj.std = np.nan_to_num(std)
+    cal_results_obj.counts = np.nan_to_num(counts)
 
     if cal_params["output"]["save_analysis_result"]:
         save_name = cal_results_obj.export(
@@ -861,21 +872,21 @@ def do_3d_calibration(cal_params, data):
         vmin=-0.05,
         vmax=0.30,
     )
-    ax[0].set_title(number_manager(data.stats["count_rate"]) + "t''' = 20")
+    ax[0].set_title(number_manager(data.stats["count_rate"]) + "  t''' = 20")
 
     ax[1].imshow(
         medians[: cal_params["prime_steps"], : cal_params["prime_steps"], 50],
         vmin=-0.05,
         vmax=0.30,
     )
-    ax[1].set_title(number_manager(data.stats["count_rate"]) + "t''' = 50")
+    ax[1].set_title(number_manager(data.stats["count_rate"]) + "  t''' = 50")
 
     ax[2].imshow(
-        medians[: cal_params["prime_steps"], : cal_params["prime_steps"], 130],
+        medians[: cal_params["prime_steps"], : cal_params["prime_steps"], 149],
         vmin=-0.05,
         vmax=0.30,
     )
-    ax[2].set_title(number_manager(data.stats["count_rate"]) + "t''' = 130")
+    ax[2].set_title(number_manager(data.stats["count_rate"]) + "  t''' = 149")
 
     ax[3].imshow(counts[: cal_params["prime_steps"], : cal_params["prime_steps"], 140])
     ax[3].set_title(f"max counts at 140: {np.max(counts)}")
@@ -1019,67 +1030,6 @@ def do_1d_calibration(cal_params, data):
     # hmm I could incorporate figure saving into dataobj
 
     return cal_results_obj
-
-
-# def do_correction():
-#     if params["correction"]["load_pre-generated_calibration"]:
-#         calibration_obj = DataObj(
-#             os.path.join(
-#                 params["correction"]["pre-generated_calibration"]["path"],
-#                 params["correction"]["pre-generated_calibration"]["file"],
-#             )
-#         )
-#     else:
-#         # else would I do this?
-#         # you could initialize the object no matter what, and give it some label inside if it is used
-#         try:
-#             cal_results_obj  # check if it exists
-#         except UnboundLocalError:
-#             print(
-#                 "Error: if calibration is not loaded externally, it must be enabled. \n"
-#                 "Set do_calibration to True, or set load_pre-generated_calibration to True"
-#             )
-#             return 1
-#
-#     # should I loop over correction files here? No, you need to load multiple files...
-#     corr_results_obj = DataObj()
-#     corr_results_obj = do_correction(
-#         calibration_obj,
-#         corr_results_obj,
-#         data_tags,
-#         nearest_pulse_times,
-#         stats,
-#         params,
-#     )
-#
-#     if params["correction"]["output"]["save_correction_result"]:
-#         corr_results_obj.export()
-#
-#     # rep rate of the calibration set may be different than that of the corrected set.
-
-
-# class RunAnalysisCopier(object):
-#     def __init__(self, path, modu_params, DERIV, PROP, delayScan, delay, Figures):
-#         self.Path = path
-#         self.Deriv = DERIV
-#         self.Prop = PROP
-#         self.DelayScan = delayScan
-#         self.Delay = delay
-#         self.Figures = Figures
-#         self.modu_params = modu_params
-#
-#     def __call__(self, file_iterator):
-#
-#         return run_analysis(
-#             self.Path,
-#             file_iterator,
-#             self.modu_params,
-#             DERIV=self.Deriv,
-#             PROP=self.Prop,
-#             delayScan=self.DelayScan,
-#             delay=self.Delay,
-#             Figures=self.Figures,
-#         )
 
 
 class MultiprocessLoaderCorrector:
