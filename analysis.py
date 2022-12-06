@@ -604,6 +604,15 @@ def prepare_data(data_params, path_dic=None):
         data_params["clock_channel"],
         data_params["data_limit"],
     )
+
+    np.savez_compressed(
+        "clocks_and_tags_jitterate_05",
+        snspd_tags=snspd_tags,
+        clock_tags=clock_tags,
+        channels=channels,
+        timetags=timetags,
+    )
+
     data.stats = data_statistics(
         data_params["modulation_params"], snspd_tags, clock_tags, debug=False
     )

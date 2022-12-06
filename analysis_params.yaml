@@ -8,10 +8,10 @@ params:
       show_figures: True
       histogram_max_tags: 500000
     data_path: "C://Users//Andrew//Documents//peacoq_1_ghz//Wire_1//41mV//"
-    data_file: "W1_41mV_3.0s_42.0.1.ttbin"
+    data_file: "W1_41mV_3.0s_65.0.1.ttbin"
     snspd_channel: -5
     clock_channel: 9
-    data_limit: 1.0e+7 #number of raw time tags to decode. Without the '+', yaml will parse this incorrectly as a string.
+    data_limit: 1.0e+8 #number of raw time tags to decode. Without the '+', yaml will parse this incorrectly as a string.
     delay_scan: False #should the program search for initial estimate of the timing offset bewteen the clock and snspd tags
     delay: -254 #restuls of the delay scan can be pasted here
     modulation_params:
@@ -66,7 +66,7 @@ params:
       path: "./peacoq_results//Wire_1//41mV//3d//"
       file: "calibration_results_3d_07.09.2022_17.25.31.json"
 
-    correct_multiple_files: True # if True, the data path at the top will be ignored
+    correct_multiple_files: False # if True, the data path at the top will be ignored
     multiple_files_path: "C://Users//Andrew//Documents//peacoq_1_ghz//Wire_1//41mV//"
 
     spline_interpolation_resolution: 200 # controls the smoothing of the CubicSpline used for measuring FWHM, etc.
