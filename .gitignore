@@ -6,6 +6,7 @@
 *.zip
 *.docx
 *.mat
+*.npz
 
 
 .idea/
@@ -13,6 +14,7 @@ __pycache__/
 .ipynb_checkpoints/
 sim/
 peacoq_results/
+clock_demo_rahaf/
 
 analysis_500mhz.py
 correction_1ghz.py
